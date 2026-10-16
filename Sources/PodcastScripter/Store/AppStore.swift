@@ -385,16 +385,27 @@ final class AppStore {
             title: story.title,
             latestUpdate: story.latestUpdate,
             mentions: story.mentions.map {
-                AIMention(episode: $0.scriptName, date: Self.isoDay($0.episodeDate), excerpt: $0.excerpt, note: $0.note)
-            }
+                AIMention(episode: $0.scriptName, date: Self.isoDay($0.episodeDate), excerpt: $0.excerpt, note: $0.note, status: $0.status?.rawValue)
+            },
+            status: story.status?.rawValue,
+            statusHistory: story.statusHistory.map { AIStatusChange(status: $0.status?.rawValue, date: Self.isoDay($0.changedAt)) }
         )
+    }
+
+    /// A script's text for Gemma, with rumor/reported/confirmed passages labeled.
+    func aiText(_ script: Script) -> String {
+        guard script.richText != nil else { return script.plainText }
+        let formatted = ScriptStyle.load(script)
+        // The formatted copy carries the marks; only trust it if it matches the plain text.
+        guard formatted.string == script.plainText else { return script.plainText }
+        return ScriptStyle.withStatusTags(formatted)
     }
 
     func aiEpisode(_ script: Script, includeScript: Bool = false) -> AIEpisode {
         AIEpisode(
             name: script.name,
             date: Self.isoDay(script.episodeDate),
-            script: includeScript ? script.plainText : nil,
+            script: includeScript ? aiText(script) : nil,
             stories: includeScript ? script.notes.map { AIEpisodeStory(kind: $0.kind.rawValue, title: $0.title, body: $0.body) } : nil
         )
     }
@@ -403,7 +414,7 @@ final class AppStore {
     var aiAppContext: AIAppContext {
         AIAppContext(
             scripts: scripts.sorted { $0.episodeDate > $1.episodeDate }.map {
-                AIScript(name: $0.name, date: Self.isoDay($0.episodeDate), script: $0.plainText)
+                AIScript(name: $0.name, date: Self.isoDay($0.episodeDate), script: aiText($0))
             },
             trackedStories: trackedStories.map(aiStory)
         )
@@ -763,6 +774,12 @@ final class AppStore {
     func updateTrackedStory(_ story: TrackedStory) {
         guard let i = trackedStories.firstIndex(where: { $0.id == story.id }) else { return }
         var updated = story
+        // A status picked in the sheet is recorded in the story's history.
+        if story.status != trackedStories[i].status {
+            updated.status = trackedStories[i].status
+            updated.statusHistory = trackedStories[i].statusHistory
+            updated.setStatus(story.status)
+        }
         updated.lastUpdated = Date()
         trackedStories[i] = updated
         save()
@@ -770,8 +787,17 @@ final class AppStore {
 
     /// Tags a script passage as part of a tracked story (an existing one, or a new one by title).
     /// Returns the story it was added to.
+    /// Sets a tracked story's status from the tracker (nil clears it).
+    func setStatus(_ status: StoryStatus?, ofStory id: TrackedStory.ID) {
+        guard let i = trackedStories.firstIndex(where: { $0.id == id }) else { return }
+        trackedStories[i].setStatus(status)
+        trackedStories[i].lastUpdated = Date()
+        save()
+    }
+
     @discardableResult
-    func tagPassage(_ excerpt: String, in scriptID: Script.ID, story storyID: TrackedStory.ID?, newTitle: String?, note: String?) -> TrackedStory? {
+    func tagPassage(_ excerpt: String, in scriptID: Script.ID, story storyID: TrackedStory.ID?, newTitle: String?, note: String?,
+                    passageStatus: StoryStatus? = nil, storyStatus: StoryStatus?? = nil) -> TrackedStory? {
         guard let script = script(scriptID) else { return nil }
         let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let mention = StoryMention(
@@ -779,7 +805,8 @@ final class AppStore {
             scriptName: script.name,
             episodeDate: script.episodeDate,
             excerpt: excerpt.trimmingCharacters(in: .whitespacesAndNewlines),
-            note: trimmedNote?.isEmpty == false ? trimmedNote : nil
+            note: trimmedNote?.isEmpty == false ? trimmedNote : nil,
+            status: passageStatus
         )
 
         let index: Int
@@ -792,6 +819,8 @@ final class AppStore {
             index = trackedStories.count - 1
         }
         trackedStories[index].mentions.append(mention)
+        // `storyStatus` nil = leave the story's status alone; .some(x) = set it (x may be nil to clear).
+        if let storyStatus { trackedStories[index].setStatus(storyStatus) }
         trackedStories[index].latestUpdate = mention.note ?? mention.excerpt
         trackedStories[index].lastUpdated = Date()
         save()

@@ -54,6 +54,29 @@ struct FormatBar: View {
 
             divider
 
+            Menu {
+                ForEach(StoryStatus.allCases) { status in
+                    Button {
+                        controller.setStatus(status)
+                    } label: {
+                        Text(controller.status == status ? "\(status.emoji)  \(status.label)  ✓" : "\(status.emoji)  \(status.label)")
+                    }
+                }
+                Divider()
+                Button("Clear Status") { controller.setStatus(nil) }
+                    .disabled(controller.status == nil)
+            } label: {
+                Text(controller.status.map { "\($0.emoji) \($0.label)" } ?? "Status")
+                    .font(.system(size: Zoom.s(12), weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .disabled(!controller.hasSelection && controller.status == nil)
+            .help("Mark the selection as a rumor (🔴), reported (🟡) or confirmed (🟢) · ⌃⌥1–3")
+
             Button(action: controller.beginTagging) {
                 Label("Track Story", systemImage: "binoculars")
                     .font(.system(size: Zoom.s(12), weight: .medium))

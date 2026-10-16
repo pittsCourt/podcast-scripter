@@ -16,7 +16,8 @@ enum ScriptExporter {
         panel.nameFieldStringValue = script.displayTitle
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        let text = ScriptStyle.load(script)
+        // Rumor / reported / confirmed marks become 🔴 🟡 🟢 in front of the passage.
+        let text = ScriptStyle.withStatusEmojis(ScriptStyle.load(script))
         let data: Data?
         switch url.pathExtension.lowercased() {
         case "rtf":
@@ -24,7 +25,7 @@ enum ScriptExporter {
         case "md", "markdown":
             data = ScriptStyle.markdown(text, title: script.displayTitle).data(using: .utf8)
         default:
-            data = "\(script.displayTitle)\n\n\(script.plainText)\n".data(using: .utf8)
+            data = "\(script.displayTitle)\n\n\(text.string)\n".data(using: .utf8)
         }
 
         do {

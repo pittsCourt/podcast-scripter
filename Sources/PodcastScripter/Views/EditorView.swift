@@ -96,7 +96,7 @@ private struct ScriptEditor: View {
             set: { if !$0 { controller.taggingExcerpt = nil } }
         )) {
             if let excerpt = controller.taggingExcerpt {
-                TrackStorySheet(excerpt: excerpt, scriptID: script.id)
+                TrackStorySheet(excerpt: excerpt, scriptID: script.id, passageStatus: controller.taggingStatus)
             }
         }
         .sheet(isPresented: $draftingBullets) {

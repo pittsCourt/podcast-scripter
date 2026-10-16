@@ -146,6 +146,15 @@ struct AIStory: Encodable, Sendable {
     var title: String
     var latestUpdate: String
     var mentions: [AIMention]
+    /// "rumor", "reported", "confirmed", or nil.
+    var status: String?
+    /// e.g. [{"status": "rumor", "date": "2026-10-03"}, {"status": "confirmed", "date": "2026-10-12"}]
+    var statusHistory: [AIStatusChange]
+}
+
+struct AIStatusChange: Encodable, Sendable {
+    var status: String?
+    var date: String
 }
 
 struct AIMention: Encodable, Sendable {
@@ -153,6 +162,7 @@ struct AIMention: Encodable, Sendable {
     var date: String
     var excerpt: String
     var note: String?
+    var status: String?
 }
 
 struct AskReply: Decodable, Sendable {
@@ -184,6 +194,7 @@ struct AskSources: Codable, Equatable, Sendable {
     struct Story: Codable, Equatable, Sendable, Hashable {
         var title: String
         var mentions: Int
+        var status: String?
     }
 
     struct Section: Codable, Equatable, Sendable, Hashable {

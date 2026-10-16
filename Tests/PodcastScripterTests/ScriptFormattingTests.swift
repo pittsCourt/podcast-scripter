@@ -538,3 +538,134 @@ struct ProjectTests {
         #expect(store.scripts.contains { $0.id == rslScript.id })
     }
 }
+
+@MainActor
+struct StoryStatusTests {
+    private func editor(_ text: String) -> (NSTextView, RichTextController) {
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        textView.isRichText = true
+        textView.allowsUndo = true
+        textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: ScriptStyle.attributes(for: .body)))
+        let controller = RichTextController()
+        controller.textView = textView
+        return (textView, controller)
+    }
+
+    @Test func marksSurviveSavingAndShowInDownloads() throws {
+        let (textView, controller) = editor("Luna to Europe in January. Glad is back in training. The club confirmed Booth's return.")
+        let text = textView.string as NSString
+        textView.setSelectedRange(text.range(of: "Luna to Europe in January."))
+        controller.setStatus(.rumor)
+        textView.setSelectedRange(text.range(of: "Glad is back in training."))
+        controller.setStatus(.reported)
+        textView.setSelectedRange(text.range(of: "The club confirmed Booth's return."))
+        controller.setStatus(.confirmed)
+        #expect(controller.status == .confirmed)
+
+        let marks = ScriptStyle.statusRanges(in: textView.attributedString())
+        #expect(marks.map(\.status) == [.rumor, .reported, .confirmed])
+
+        // Save as RTF and reopen.
+        var script = Script(name: "Episode", episodeDate: Date())
+        script.plainText = textView.string
+        script.richText = ScriptStyle.rtfData(textView.attributedString())
+        let reloaded = ScriptStyle.load(script)
+        #expect(ScriptStyle.statusRanges(in: reloaded).map(\.status) == [.rumor, .reported, .confirmed])
+        #expect(ScriptStyle.statusRanges(in: reloaded).map { (reloaded.string as NSString).substring(with: $0.range) }
+                == ["Luna to Europe in January.", "Glad is back in training.", "The club confirmed Booth's return."])
+
+        // Downloads put the emoji in front of each passage and drop the tint.
+        let exported = ScriptStyle.withStatusEmojis(reloaded)
+        #expect(exported.string == "🔴 Luna to Europe in January. 🟡 Glad is back in training. 🟢 The club confirmed Booth's return.")
+        #expect(ScriptStyle.statusRanges(in: exported).isEmpty)
+        #expect(ScriptStyle.markdown(exported, title: "T").contains("🔴 Luna to Europe"))
+    }
+
+    @Test func clearingAndChangingAMark() {
+        let (textView, controller) = editor("Transfer talk heating up")
+        textView.setSelectedRange(NSRange(location: 0, length: 13))
+        controller.setStatus(.rumor)
+        controller.setStatus(.confirmed)
+        #expect(ScriptStyle.statusRanges(in: textView.attributedString()).map(\.status) == [.confirmed])
+        // With only a cursor inside the passage, Clear Status clears the whole mark.
+        textView.setSelectedRange(NSRange(location: 4, length: 0))
+        controller.setStatus(nil)
+        #expect(ScriptStyle.statusRanges(in: textView.attributedString()).isEmpty)
+    }
+
+    /// The editor's real text view (hand-built TextKit stack) lays out and draws the margin marks.
+    @Test func editorTextViewDrawsMarks() throws {
+        let storage = NSTextStorage(string: "A rumor here.\nSomething confirmed.", attributes: ScriptStyle.attributes(for: .body))
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(size: NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude))
+        layoutManager.addTextContainer(container)
+        let textView = ScriptTextView(frame: NSRect(x: 0, y: 0, width: 460, height: 300), textContainer: container)
+        textView.textContainerInset = NSSize(width: ScriptTextView.margin, height: 24)
+        storage.addAttribute(.backgroundColor, value: StoryStatus.rumor.tint, range: NSRange(location: 2, length: 5))
+
+        let bitmap = try #require(textView.bitmapImageRepForCachingDisplay(in: textView.bounds))
+        textView.cacheDisplay(in: textView.bounds, to: bitmap)
+        #expect(layoutManager.numberOfGlyphs > 0)
+        #expect(ScriptStyle.statusRanges(in: storage).count == 1)
+    }
+}
+
+@MainActor
+struct TrackedStoryStatusTests {
+    @Test func statusIsOptionalAndKeepsHistory() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        store.addTrackedStory(title: "Luna to Europe")
+        let id = try #require(store.trackedStories.first { $0.title == "Luna to Europe" }?.id)
+        #expect(store.trackedStories.first { $0.id == id }?.status == nil) // not required
+
+        store.setStatus(.rumor, ofStory: id)
+        store.setStatus(.rumor, ofStory: id) // unchanged: no new history entry
+        var story = try #require(store.trackedStories.first { $0.id == id })
+        story.status = .confirmed // as the story sheet would
+        store.updateTrackedStory(story)
+
+        let saved = try #require(store.trackedStories.first { $0.id == id })
+        #expect(saved.status == .confirmed)
+        #expect(saved.statusHistory.map(\.status) == [.rumor, .confirmed])
+
+        let ai = store.aiStory(saved)
+        #expect(ai.status == "confirmed")
+        #expect(ai.statusHistory.map(\.status) == ["rumor", "confirmed"])
+    }
+
+    @Test func taggingCarriesPassageAndStoryStatus() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let script = store.createScript(name: "Episode 29", date: Date())
+        let story = try #require(store.tagPassage("Bundesliga interest in Luna", in: script.id, story: nil, newTitle: "Luna to Europe",
+                                                  note: nil, passageStatus: .rumor, storyStatus: .some(.rumor)))
+        #expect(story.status == .rumor)
+        #expect(story.mentions.first?.status == .rumor)
+        // Tagging without touching the status leaves it alone.
+        let again = try #require(store.tagPassage("More talk", in: script.id, story: story.id, newTitle: nil, note: nil))
+        #expect(again.status == .rumor && again.statusHistory.count == 1)
+    }
+
+    @Test func gemmaSeesScriptStatusTags() {
+        var script = Script(name: "Episode 29", episodeDate: Date())
+        let text = NSMutableAttributedString(string: "Luna could move in January. Glad is back.", attributes: ScriptStyle.attributes(for: .body))
+        text.addAttribute(.backgroundColor, value: StoryStatus.rumor.tint, range: NSRange(location: 0, length: 27))
+        text.addAttribute(.backgroundColor, value: StoryStatus.confirmed.tint, range: NSRange(location: 28, length: 13))
+        script.plainText = text.string
+        script.richText = ScriptStyle.rtfData(text)
+        let store = AppStore(service: FakeNotesService(), fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json"))
+        #expect(store.aiText(script) == "[RUMOR] Luna could move in January. [/RUMOR] [CONFIRMED] Glad is back. [/CONFIRMED]")
+    }
+
+    @Test func storiesSavedBeforeStatusesLoad() throws {
+        let json = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","title":"Zach Booth Injury","latestUpdate":"","lastUpdated":"2026-10-01T00:00:00Z","mentions":[]}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let story = try decoder.decode(TrackedStory.self, from: Data(json.utf8))
+        #expect(story.status == nil && story.statusHistory.isEmpty)
+    }
+}

@@ -14,6 +14,8 @@ final class RichTextController {
     private(set) var isUnderlined = false
     private(set) var isStruckThrough = false
     private(set) var linkURL: URL?
+    /// Rumor / reported / confirmed for the selection, if any.
+    private(set) var status: StoryStatus?
 
     /// Drives the link sheet; set by ⌘K or the link button.
     var isEditingLink = false
@@ -24,8 +26,12 @@ final class RichTextController {
     func beginTagging() {
         let text = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        taggingStatus = status
         taggingExcerpt = text
     }
+
+    /// The highlighted passage's own rumor/reported/confirmed mark, captured with `taggingExcerpt`.
+    var taggingStatus: StoryStatus?
 
     private(set) var hasSelection = false
 
@@ -77,6 +83,31 @@ final class RichTextController {
         } typing: { _ in
             ScriptStyle.attributes(for: .body)
         }
+    }
+
+    // MARK: Story status
+
+    /// Marks the selection as rumor, reported or confirmed (nil clears it). Shown as an emoji in
+    /// the margin and a faint tint behind the text.
+    func setStatus(_ newStatus: StoryStatus?) {
+        guard let textView, let storage = textView.textStorage else { return }
+        var range = textView.selectedRange()
+        // With just a cursor, act on the marked passage it's in.
+        if range.length == 0 {
+            guard let match = ScriptStyle.statusRanges(in: storage).first(where: { NSLocationInRange(range.location, $0.range) || NSMaxRange($0.range) == range.location }) else { return }
+            range = match.range
+        }
+        guard textView.shouldChangeText(in: range, replacementString: nil) else { return }
+        storage.beginEditing()
+        if let newStatus {
+            storage.addAttribute(.backgroundColor, value: newStatus.tint, range: range)
+        } else {
+            storage.removeAttribute(.backgroundColor, range: range)
+        }
+        storage.endEditing()
+        textView.didChangeText()
+        textView.needsDisplay = true
+        updateState()
     }
 
     // MARK: Inline styles
@@ -257,6 +288,9 @@ final class RichTextController {
         isBold = traits.bold
         isItalic = traits.italic
         isUnderlined = (attrs[.underlineStyle] as? Int ?? 0) != 0
+        status = ScriptStyle.status(from: range.length > 0 || storage.length == 0
+            ? attrs
+            : storage.attributes(at: max(0, min(range.location, storage.length) - 1), effectiveRange: nil))
         isStruckThrough = (attrs[.strikethroughStyle] as? Int ?? 0) != 0
 
         var link = ScriptStyle.linkURL(attrs[.link])
@@ -313,7 +347,24 @@ struct RichTextEditor: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
+        // Built by hand (TextKit 1) so the margin can be drawn from the layout manager.
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layoutManager.addTextContainer(container)
+        context.coordinator.storage = storage
+
+        let textView = ScriptTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 600), textContainer: container)
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -321,7 +372,6 @@ struct RichTextEditor: NSViewRepresentable {
         scrollView.allowsMagnification = true
         scrollView.magnification = Zoom.factor
 
-        let textView = scrollView.documentView as! NSTextView
         textView.isRichText = true
         textView.allowsUndo = true
         textView.drawsBackground = false
@@ -331,7 +381,8 @@ struct RichTextEditor: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = true
         textView.isAutomaticDashSubstitutionEnabled = true
         textView.isAutomaticQuoteSubstitutionEnabled = true
-        textView.textContainerInset = NSSize(width: 0, height: 24)
+        // The left inset is the margin for 🔴 🟡 🟢 status marks.
+        textView.textContainerInset = NSSize(width: ScriptTextView.margin, height: 24)
         textView.insertionPointColor = ScriptStyle.linkColor
         textView.linkTextAttributes = [
             .foregroundColor: ScriptStyle.linkColor,
@@ -358,6 +409,8 @@ struct RichTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: RichTextEditor
         var loadedID: UUID?
+        /// The text view doesn't own its storage when the TextKit stack is built by hand.
+        var storage: NSTextStorage?
         private var returnedFromHeading = false
 
         init(_ parent: RichTextEditor) {
@@ -389,24 +442,41 @@ struct RichTextEditor: NSViewRepresentable {
             }
             parent.onChange(textView.attributedString())
             parent.controller.updateState()
+            textView.needsDisplay = true // margin marks follow the text
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             parent.controller.updateState()
         }
 
-        /// Adds "Track as Story…" to the right-click menu when text is selected.
+        /// Adds "Track as Story…" and the status marks to the right-click menu when text is selected.
         func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
             guard view.selectedRange().length > 0 else { return menu }
-            let item = NSMenuItem(title: "Track as Story…", action: #selector(trackStory), keyEquivalent: "")
-            item.target = self
-            menu.insertItem(item, at: 0)
-            menu.insertItem(.separator(), at: 1)
+            var index = 0
+            func add(_ title: String, _ action: Selector, tag: Int = 0) {
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                item.tag = tag
+                menu.insertItem(item, at: index)
+                index += 1
+            }
+            add("Track as Story…", #selector(trackStory))
+            for (offset, status) in StoryStatus.allCases.enumerated() {
+                add("\(status.emoji)  Mark as \(status.label)", #selector(markStatus(_:)), tag: offset + 1)
+            }
+            if ScriptStyle.status(from: view.textStorage?.attributes(at: view.selectedRange().location, effectiveRange: nil) ?? [:]) != nil {
+                add("Clear Status", #selector(markStatus(_:)), tag: 0)
+            }
+            menu.insertItem(.separator(), at: index)
             return menu
         }
 
         @objc private func trackStory() {
             parent.controller.beginTagging()
+        }
+
+        @objc private func markStatus(_ sender: NSMenuItem) {
+            parent.controller.setStatus(sender.tag == 0 ? nil : StoryStatus.allCases[sender.tag - 1])
         }
     }
 }
@@ -452,6 +522,15 @@ struct FormatCommands: Commands {
                 Button("Decrease Indent") { controller?.outdent() }
                     .keyboardShortcut("[", modifiers: [.command, .option])
             }
+            Menu("Mark As") {
+                ForEach(Array(StoryStatus.allCases.enumerated()), id: \.element) { offset, status in
+                    Button("\(status.emoji)  \(status.label)") { controller?.setStatus(status) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(offset + 1)")), modifiers: [.control, .option])
+                }
+                Divider()
+                Button("Clear Status") { controller?.setStatus(nil) }
+                    .keyboardShortcut("0", modifiers: [.control, .option])
+            }
             Section {
                 Button("Track as Story…") { controller?.beginTagging() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
@@ -470,6 +549,38 @@ struct FormatCommands: Commands {
         case .heading3: "3"
         case .heading4: "4"
         case .quote: "'"
+        }
+    }
+}
+
+/// The script's text view: draws each marked passage's 🔴 🟡 🟢 in the left margin, beside the
+/// passage's first line.
+final class ScriptTextView: NSTextView {
+    static let margin: CGFloat = 28
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let storage = textStorage, storage.length > 0, let layoutManager else { return }
+        let origin = textContainerOrigin
+        var lastLineY: CGFloat = -.greatestFiniteMagnitude
+        var offset: CGFloat = 0
+
+        for (range, status) in ScriptStyle.statusRanges(in: storage) {
+            let glyph = layoutManager.glyphIndexForCharacter(at: range.location)
+            guard glyph < layoutManager.numberOfGlyphs else { continue }
+            let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            let lineY = line.minY + origin.y
+            // Two marks starting on the same line sit side by side.
+            offset = abs(lineY - lastLineY) < 1 ? offset + 16 : 0
+            lastLineY = lineY
+
+            let font = (storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont) ?? .systemFont(ofSize: 16)
+            let emoji = NSAttributedString(string: status.emoji, attributes: [.font: NSFont.systemFont(ofSize: 12)])
+            let size = emoji.size()
+            let textHeight = layoutManager.defaultLineHeight(for: font)
+            let point = NSPoint(x: 6 + offset, y: lineY + max(0, (textHeight - size.height) / 2))
+            guard NSRect(origin: point, size: size).intersects(dirtyRect) else { continue }
+            emoji.draw(at: point)
         }
     }
 }

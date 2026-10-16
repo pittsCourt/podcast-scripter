@@ -78,16 +78,22 @@ struct TrackedStory: Identifiable, Codable, Hashable {
     var lastUpdated = Date()
     /// What was said about it in scripts, oldest first (tagged in the editor).
     var mentions: [StoryMention] = []
+    /// Rumor / reported / confirmed. Optional: most stories don't need one.
+    var status: StoryStatus?
+    /// Every status change, oldest first, so you can see how the story developed.
+    var statusHistory: [StatusChange] = []
 
-    init(id: UUID = UUID(), title: String, latestUpdate: String = "", lastUpdated: Date = Date(), mentions: [StoryMention] = []) {
+    init(id: UUID = UUID(), title: String, latestUpdate: String = "", lastUpdated: Date = Date(), mentions: [StoryMention] = [], status: StoryStatus? = nil, statusHistory: [StatusChange] = []) {
         self.id = id
         self.title = title
         self.latestUpdate = latestUpdate
         self.lastUpdated = lastUpdated
         self.mentions = mentions
+        self.status = status
+        self.statusHistory = statusHistory
     }
 
-    // Written by hand so stories saved before `mentions` existed still load.
+    // Written by hand so stories saved before `mentions` and `status` existed still load.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -95,7 +101,22 @@ struct TrackedStory: Identifiable, Codable, Hashable {
         latestUpdate = try c.decodeIfPresent(String.self, forKey: .latestUpdate) ?? ""
         lastUpdated = try c.decodeIfPresent(Date.self, forKey: .lastUpdated) ?? Date()
         mentions = try c.decodeIfPresent([StoryMention].self, forKey: .mentions) ?? []
+        status = try? c.decodeIfPresent(StoryStatus.self, forKey: .status)
+        statusHistory = (try? c.decodeIfPresent([StatusChange].self, forKey: .statusHistory)) ?? []
     }
+
+    /// Sets the status, recording the change (nil clears it). No-op if unchanged.
+    mutating func setStatus(_ newStatus: StoryStatus?, at date: Date = Date()) {
+        guard newStatus != status else { return }
+        status = newStatus
+        statusHistory.append(StatusChange(status: newStatus, changedAt: date))
+    }
+}
+
+/// One step in a tracked story's status history (nil = status cleared).
+struct StatusChange: Codable, Hashable {
+    var status: StoryStatus?
+    var changedAt: Date
 }
 
 /// A passage from a script tagged as part of a tracked story.
@@ -109,10 +130,12 @@ struct StoryMention: Identifiable, Codable, Hashable {
     /// Optional takeaway, e.g. "Expected back after the international break".
     var note: String?
     var taggedAt = Date()
+    /// The passage's own mark in the script when it was tagged, if any.
+    var status: StoryStatus?
 
     // Saved under the names used before scripts were called scripts.
     private enum CodingKeys: String, CodingKey {
-        case id, episodeDate, excerpt, note, taggedAt
+        case id, episodeDate, excerpt, note, taggedAt, status
         case scriptID = "projectID"
         case scriptName = "projectName"
     }

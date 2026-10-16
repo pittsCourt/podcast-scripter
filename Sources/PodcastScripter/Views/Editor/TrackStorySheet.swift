@@ -6,6 +6,9 @@ struct TrackStorySheet: View {
     @Environment(\.dismiss) private var dismiss
     var excerpt: String
     var scriptID: Script.ID
+    /// The passage's own mark in the script, if any; suggested as the story's status.
+    var passageStatus: StoryStatus? = nil
+    @State private var storyStatus: StoryStatus?
 
     @State private var choice: Choice = .new
     @State private var newTitle = ""
@@ -84,6 +87,15 @@ struct TrackStorySheet: View {
                     .pickerStyle(.radioGroup)
                     .labelsHidden()
                 }
+
+                Section {
+                    StatusPicker(status: $storyStatus)
+                } header: {
+                    Text("Story status (optional)")
+                } footer: {
+                    Text(passageStatus.map { "Suggested from the passage’s \($0.label.lowercased()) mark. " } ?? "")
+                        + Text("Changes are kept in the story’s history.")
+                }
             }
             .formStyle(.grouped)
             .frame(maxHeight: 420)
@@ -93,16 +105,30 @@ struct TrackStorySheet: View {
                 if case .existing(let id) = choice { storyID = id }
                 // The passage is kept as the mention; a different update text is saved as its note.
                 let text = update.trimmingCharacters(in: .whitespacesAndNewlines)
-                store.tagPassage(excerpt, in: scriptID, story: storyID, newTitle: newTitle, note: text == excerpt ? nil : text)
+                store.tagPassage(excerpt, in: scriptID, story: storyID, newTitle: newTitle, note: text == excerpt ? nil : text,
+                                 passageStatus: passageStatus, storyStatus: .some(storyStatus))
             }
         }
         .frame(width: 460)
+        .onChange(of: choice) { suggestStatus() }
         .onAppear {
             update = excerpt
+            suggestStatus()
             // Until Gemma answers, suggest the story most recently tagged in this episode.
             if let recent = store.trackedStories(in: scriptID).first { choice = .existing(recent.id) }
         }
         .task { await suggest() }
+    }
+
+    /// The passage's mark if it has one, else the chosen story's current status.
+    private func suggestStatus() {
+        if let passageStatus {
+            storyStatus = passageStatus
+        } else if case .existing(let id) = choice {
+            storyStatus = store.trackedStories.first { $0.id == id }?.status
+        } else {
+            storyStatus = nil
+        }
     }
 
     @ViewBuilder

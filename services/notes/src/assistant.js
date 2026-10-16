@@ -26,7 +26,12 @@ function persona() {
   const { show, team } = config.get();
   return `You are the research assistant for "${show.fullName}", a podcast about ${team.name} hosted by ${show.host}. `
     + `Today is ${new Date().toDateString()}. Answer only from the information provided below; if it isn't there, say you don't have it. `
-    + 'Be concise and specific. When you use something from a script, name the episode and its date.';
+    + 'Be concise and specific. When you use something from a script, name the episode and its date. '
+    + 'The host marks how solid information is: [RUMOR] … [/RUMOR] is unconfirmed talk, [REPORTED] … [/REPORTED] has been '
+    + 'reported by media but not officially confirmed, and [CONFIRMED] … [/CONFIRMED] is confirmed. Tracked stories can carry the '
+    + 'same status, with a dated history. Keep these apart: never present a rumor or report as confirmed, say which it is when it '
+    + 'matters, and use the latest status when a story has changed. Unmarked text has no status. In your answer, say the status '
+    + 'in plain words (e.g. "only a rumor so far", "reported but not confirmed", "confirmed") — never repeat the bracket tags.';
 }
 
 /** Lowercase keywords from a question, for picking relevant script passages. */
@@ -113,10 +118,16 @@ function fitParts(parts, limit) {
 
 // --- app-side context ---
 
+const statusLabel = (status) => (status ? String(status).toUpperCase() : 'no status');
+
 function trackerText(stories = [], limit) {
   const blocks = stories.map((s) => {
-    const mentions = (s.mentions || []).map((m) => `  - ${m.episode} (${day(m.date)}): "${clip(m.excerpt, 300)}"${m.note ? ` — note: ${m.note}` : ''}`);
-    return `* ${s.title}${s.latestUpdate ? ` — latest: ${clip(s.latestUpdate, 200)}` : ''}${mentions.length ? `\n${mentions.join('\n')}` : ''}`;
+    const mentions = (s.mentions || []).map((m) => `  - ${m.episode} (${day(m.date)})${m.status ? ` [${statusLabel(m.status)}]` : ''}: "${clip(m.excerpt, 300)}"${m.note ? ` — note: ${m.note}` : ''}`);
+    const history = (s.statusHistory || []).length > 1
+      ? ` (status history: ${s.statusHistory.map((h) => `${statusLabel(h.status)} ${day(h.date)}`).join(' → ')})`
+      : '';
+    const status = s.status ? ` [status: ${statusLabel(s.status)}]${history}` : history;
+    return `* ${s.title}${status}${s.latestUpdate ? ` — latest: ${clip(s.latestUpdate, 200)}` : ''}${mentions.length ? `\n${mentions.join('\n')}` : ''}`;
   });
   return clip('STORY TRACKER:\n' + blocks.join('\n'), limit);
 }
@@ -179,7 +190,7 @@ async function ask({ question, history = [], app = {} }) {
     sources: {
       excerpts: scripts.excerpts,
       episodes: scripts.episodes,
-      stories: stories.map((st) => ({ title: st.title, mentions: (st.mentions || []).length })),
+      stories: stories.map((st) => ({ title: st.title, mentions: (st.mentions || []).length, status: st.status || null })),
       storiesShortened: !trackerFull,
       data: service.included,
     },

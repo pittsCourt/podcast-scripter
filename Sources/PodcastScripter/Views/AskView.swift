@@ -197,7 +197,7 @@ private struct SourcesView: View {
                     group("Story Tracker") {
                         if sources.stories.isEmpty { note("No tracked stories.") }
                         ForEach(sources.stories, id: \.self) { story in
-                            line(story.title, "\(story.mentions) \(story.mentions == 1 ? "mention" : "mentions")")
+                            line("\(story.status.flatMap(StoryStatus.init(rawValue:)).map { "\($0.emoji) " } ?? "")\(story.title)", "\(story.mentions) \(story.mentions == 1 ? "mention" : "mentions")")
                         }
                         if sources.storiesShortened { note("Shortened to fit the size limit in Settings → AI.") }
                     }

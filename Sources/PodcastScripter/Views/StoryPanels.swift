@@ -384,6 +384,15 @@ struct StoryTrackerPanel: View {
                                 .onTapGesture { editing = story }
                                 .contextMenu {
                                     Button("Edit…") { editing = story }
+                                    Menu("Status") {
+                                        ForEach(StoryStatus.allCases) { status in
+                                            Button("\(status.emoji)  \(status.label)") { store.setStatus(status, ofStory: story.id) }
+                                        }
+                                        Divider()
+                                        Button("No Status") { store.setStatus(nil, ofStory: story.id) }
+                                            .disabled(story.status == nil)
+                                    }
+                                    Divider()
                                     Button("Stop Tracking…", role: .destructive) { pendingStop = story }
                                 }
                         }
@@ -428,9 +437,16 @@ private struct TrackedStoryRow: View {
                     .frame(width: 6, height: 6)
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(story.title)
-                        .font(.system(size: Zoom.s(13), weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                    HStack(spacing: 5) {
+                        if let status = story.status {
+                            Text(status.emoji)
+                                .font(.system(size: Zoom.s(11)))
+                                .help(status.label)
+                        }
+                        Text(story.title)
+                            .font(.system(size: Zoom.s(13), weight: .semibold))
+                            .foregroundStyle(Theme.textPrimary)
+                    }
                     Text(story.latestUpdate.isEmpty ? "No updates yet" : story.latestUpdate)
                         .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(story.latestUpdate.isEmpty ? Theme.textTertiary : Theme.textSecondary)
@@ -466,6 +482,19 @@ private struct TrackedStorySheet: View {
                 TextField("Story", text: $story.title)
                 TextField("Latest update", text: $story.latestUpdate, axis: .vertical)
                     .lineLimit(4...10)
+                Section {
+                    StatusPicker(status: $story.status)
+                    if !story.statusHistory.isEmpty {
+                        Text(story.statusHistory.map { "\($0.status.map { "\($0.emoji) \($0.label)" } ?? "No status") (\($0.changedAt.formatted(.dateTime.month(.abbreviated).day())))" }.joined(separator: "  →  "))
+                            .font(.system(size: Zoom.s(11)))
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Status (optional)")
+                } footer: {
+                    Text("Update it as the story develops; each change is kept with its date.")
+                        .foregroundStyle(.secondary)
+                }
                 if !story.mentions.isEmpty {
                     Section("What you’ve said (\(story.mentions.count))") {
                         ForEach(story.mentions.reversed()) { mention in
@@ -527,5 +556,19 @@ struct SheetButtons: View {
             .disabled(!canConfirm)
         }
         .padding([.horizontal, .bottom], 20)
+    }
+}
+
+/// None / Rumor / Reported / Confirmed, as a segmented control.
+struct StatusPicker: View {
+    @Binding var status: StoryStatus?
+
+    var body: some View {
+        Picker("Status", selection: $status) {
+            Text("None").tag(StoryStatus?.none)
+            ForEach(StoryStatus.allCases) { Text("\($0.emoji) \($0.label)").tag(StoryStatus?.some($0)) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }

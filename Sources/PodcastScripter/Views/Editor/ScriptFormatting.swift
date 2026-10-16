@@ -74,6 +74,44 @@ enum BlockStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// How solid a passage is: marked from the editor, shown as 🔴 🟡 🟢 in the margin.
+enum StoryStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case rumor
+    case reported
+    case confirmed
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .rumor: "Rumor"
+        case .reported: "Reported"
+        case .confirmed: "Confirmed"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .rumor: "🔴"
+        case .reported: "🟡"
+        case .confirmed: "🟢"
+        }
+    }
+
+    /// How it's labeled for Gemma, e.g. "[RUMOR] … [/RUMOR]".
+    var tag: String { rawValue.uppercased() }
+
+    /// Stored as the passage's background color: the status hue blended into the dark page, opaque
+    /// so it survives RTF exactly. Each is unique so the status can be read back.
+    var tint: NSColor {
+        switch self {
+        case .rumor: NSColor(srgbRed: 64 / 255, green: 39 / 255, blue: 42 / 255, alpha: 1)
+        case .reported: NSColor(srgbRed: 64 / 255, green: 53 / 255, blue: 28 / 255, alpha: 1)
+        case .confirmed: NSColor(srgbRed: 32 / 255, green: 59 / 255, blue: 44 / 255, alpha: 1)
+        }
+    }
+}
+
 /// Fonts, colors and conversions for the formatted script.
 enum ScriptStyle {
     static let indentStep: CGFloat = 28
@@ -143,6 +181,48 @@ enum ScriptStyle {
             bold: !block.isHeading && isBold(font),
             italic: block != .quote && isItalic(font)
         )
+    }
+
+    // MARK: Story status
+
+    static func status(from attributes: [NSAttributedString.Key: Any]) -> StoryStatus? {
+        guard let color = attributes[.backgroundColor] as? NSColor else { return nil }
+        return StoryStatus.allCases.first { isClose(color, $0.tint) }
+    }
+
+    /// Each marked passage once, in order (touching runs with the same status are merged).
+    static func statusRanges(in text: NSAttributedString) -> [(range: NSRange, status: StoryStatus)] {
+        var ranges: [(range: NSRange, status: StoryStatus)] = []
+        text.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: text.length)) { _, run, _ in
+            guard let status = status(from: text.attributes(at: run.location, effectiveRange: nil)) else { return }
+            if let last = ranges.last, last.status == status, NSMaxRange(last.range) == run.location {
+                ranges[ranges.count - 1].range.length += run.length
+            } else {
+                ranges.append((run, status))
+            }
+        }
+        return ranges
+    }
+
+    /// For Gemma: each marked passage wrapped in its status, e.g. "[RUMOR] Luna to Europe [/RUMOR]".
+    static func withStatusTags(_ text: NSAttributedString) -> String {
+        let output = NSMutableString(string: text.string)
+        for (range, status) in statusRanges(in: text).reversed() {
+            output.insert(" [/\(status.tag)]", at: NSMaxRange(range))
+            output.insert("[\(status.tag)] ", at: range.location)
+        }
+        return output as String
+    }
+
+    /// For downloads: the tint is removed and each marked passage starts with its emoji instead.
+    static func withStatusEmojis(_ text: NSAttributedString) -> NSAttributedString {
+        let output = NSMutableAttributedString(attributedString: text)
+        for (range, status) in statusRanges(in: text).reversed() {
+            output.removeAttribute(.backgroundColor, range: range)
+            let attrs = output.attributes(at: range.location, effectiveRange: nil)
+            output.insert(NSAttributedString(string: "\(status.emoji) ", attributes: attrs), at: range.location)
+        }
+        return output
     }
 
     private static func isClose(_ a: NSColor, _ b: NSColor) -> Bool {
