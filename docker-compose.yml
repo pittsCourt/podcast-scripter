@@ -1,0 +1,13 @@
+# Notes service: `docker compose up -d --build`, then open http://localhost:3030
+services:
+  notes:
+    build: ./services/notes
+    ports:
+      - "3030:3000"
+    volumes:
+      - ./services/notes/data:/app/data
+    environment:
+      # Set in .env (not committed). Leave empty to disable auth (local testing only).
+      NOTES_TOKEN: ${NOTES_TOKEN:-}
+      FEED_INTERVAL_MINUTES: ${FEED_INTERVAL_MINUTES:-30}
+    restart: unless-stopped

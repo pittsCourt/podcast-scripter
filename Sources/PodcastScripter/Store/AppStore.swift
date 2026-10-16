@@ -6,26 +6,31 @@ enum Route: Hashable {
     case editor(Project.ID)
 }
 
+enum ConnectionState: Equatable {
+    case connecting
+    case online(lastSync: Date)
+    case offline(reason: String)
+}
+
 /// Everything the user creates; written to disk as JSON.
 private struct PersistedState: Codable {
     var projects: [Project] = []
     var storyQueue: [StoryItem] = []
     var trackedStories: [TrackedStory] = []
-    var instructionFiles: [InstructionFile] = []
 }
 
 @MainActor
 @Observable
 final class AppStore {
-    // Persisted
+    // Persisted. `storyQueue` mirrors the notes service inbox and is cached for offline use.
     var projects: [Project] = []
     var storyQueue: [StoryItem] = []
     var trackedStories: [TrackedStory] = []
-    var instructionFiles: [InstructionFile] = []
 
-    // Fetched from the service each launch
-    var rankings: [RankingGroup] = []
+    // Fetched from the notes service; not persisted
+    var rankings: [RankingGroup] = MockRankings.groups
     var news: [NewsItem] = []
+    var connection: ConnectionState = .connecting
 
     // UI state
     var route: Route = .home
@@ -33,14 +38,21 @@ final class AppStore {
     var selectedQueueIDs: Set<StoryItem.ID> = []
     var lastError: String?
 
-    private let service: NewsService
+    private var service: NotesService
     private let fileURL: URL
     private var saveTask: Task<Void, Never>?
 
-    init(service: NewsService, fileURL: URL = AppStore.defaultFileURL) {
-        self.service = service
+    init(service: NotesService? = nil, fileURL: URL = AppStore.defaultFileURL) {
+        self.service = service ?? NotesServiceClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
         self.fileURL = fileURL
         load()
+    }
+
+    /// Call after the service URL or token changes in Settings.
+    func reconfigureService() async {
+        service = NotesServiceClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
+        connection = .connecting
+        await refresh()
     }
 
     /// `PODCAST_SCRIPTER_DATA=/path/data.json` overrides the location (handy for testing).
@@ -55,11 +67,8 @@ final class AppStore {
 
     // MARK: - Loading & saving
 
-    private var isFirstLaunch = false
-
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else {
-            isFirstLaunch = true
             seedSampleData()
             return
         }
@@ -70,25 +79,36 @@ final class AppStore {
             projects = state.projects
             storyQueue = state.storyQueue
             trackedStories = state.trackedStories
-            instructionFiles = state.instructionFiles
         } catch {
             lastError = "Couldn't read saved data: \(error.localizedDescription)"
         }
     }
 
+    /// Pulls the inbox and news. Failures only change `connection`; the cached queue stays.
     func refresh() async {
         do {
-            async let rankings = service.fetchRankings()
-            async let news = service.fetchNews()
-            self.rankings = try await rankings
-            self.news = try await news
-            if isFirstLaunch {
-                storyQueue = try await service.fetchGeneratedStories()
-                isFirstLaunch = false
+            async let inbox = service.fetchInbox()
+            async let teamNews = service.fetchNews(category: .team, limit: 15)
+            async let leagueNews = service.fetchNews(category: .league, limit: 15)
+            let (items, team, league) = try await (inbox, teamNews, leagueNews)
+
+            if items != storyQueue {
+                storyQueue = items
+                selectedQueueIDs.formIntersection(items.map(\.id))
                 save()
             }
+            news = team + league
+            connection = .online(lastSync: Date())
         } catch {
-            lastError = "Couldn't reach the news service: \(error.localizedDescription)"
+            connection = .offline(reason: error.localizedDescription)
+        }
+    }
+
+    /// Keeps the queue current with things shared from the phone. Runs for the app's lifetime.
+    func runRefreshLoop(every interval: Duration = .seconds(60)) async {
+        while !Task.isCancelled {
+            await refresh()
+            try? await Task.sleep(for: interval)
         }
     }
 
@@ -107,8 +127,7 @@ final class AppStore {
         let state = PersistedState(
             projects: projects,
             storyQueue: storyQueue,
-            trackedStories: trackedStories,
-            instructionFiles: instructionFiles
+            trackedStories: trackedStories
         )
         do {
             let encoder = JSONEncoder()
@@ -196,8 +215,8 @@ final class AppStore {
         }
     }
 
-    /// Moves the selected queue items into a new project and opens it.
-    func createProjectFromSelected() {
+    /// Copies the selected queue items into a new project, opens it, and marks them used in the service.
+    func createProjectFromSelected() async {
         let selected = storyQueue.filter { selectedQueueIDs.contains($0.id) }
         guard !selected.isEmpty else { return }
         let project = createProject(
@@ -209,17 +228,49 @@ final class AppStore {
         selectedQueueIDs.removeAll()
         save()
         open(project.id)
+
+        do {
+            for item in selected { try await service.markUsed(item.id) }
+        } catch {
+            lastError = "The project was created, but some stories couldn't be marked as used, so they may reappear in the queue. \(error.localizedDescription)"
+        }
     }
 
-    func deleteSelected() {
-        storyQueue.removeAll { selectedQueueIDs.contains($0.id) }
-        selectedQueueIDs.removeAll()
+    func deleteSelected() async {
+        for id in selectedQueueIDs {
+            do {
+                try await service.delete(id)
+                storyQueue.removeAll { $0.id == id }
+                selectedQueueIDs.remove(id)
+            } catch {
+                lastError = "Couldn't delete from the notes service: \(error.localizedDescription)"
+                break
+            }
+        }
         save()
     }
 
-    func addStory(_ item: StoryItem) {
-        storyQueue.insert(item, at: 0)
-        save()
+    /// Sends a link or note to the service. Returns false (and sets `lastError`) on failure.
+    func addStory(input: String) async -> Bool {
+        do {
+            let item = try await service.add(input: input)
+            storyQueue.removeAll { $0.id == item.id }
+            storyQueue.insert(item, at: 0)
+            save()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    func testConnection() async -> String? {
+        do {
+            try await service.checkHealth()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     // MARK: - Story tracker
@@ -246,25 +297,6 @@ final class AppStore {
 
     func deleteTrackedStory(_ id: TrackedStory.ID) {
         trackedStories.removeAll { $0.id == id }
-        save()
-    }
-
-    // MARK: - Instruction files
-
-    func importInstructionFile(from url: URL) {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let content = try String(contentsOf: url, encoding: .utf8)
-            instructionFiles.append(InstructionFile(name: url.lastPathComponent, content: content))
-            save()
-        } catch {
-            lastError = "Couldn't import \(url.lastPathComponent): \(error.localizedDescription)"
-        }
-    }
-
-    func deleteInstructionFile(_ id: InstructionFile.ID) {
-        instructionFiles.removeAll { $0.id == id }
         save()
     }
 

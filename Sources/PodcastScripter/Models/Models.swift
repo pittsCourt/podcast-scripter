@@ -66,14 +66,6 @@ struct TrackedStory: Identifiable, Codable, Hashable {
     var lastUpdated = Date()
 }
 
-/// Reference/instruction files (style guides, show formats) available to the assistant.
-struct InstructionFile: Identifiable, Codable, Hashable {
-    var id = UUID()
-    var name: String
-    var content: String
-    var addedAt = Date()
-}
-
 struct RankingEntry: Identifiable, Hashable, Sendable {
     var id: String { source }
     var source: String

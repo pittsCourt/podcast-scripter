@@ -1,92 +1,208 @@
 import SwiftUI
 
 enum Theme {
-    static let window = Color(red: 0.11, green: 0.10, blue: 0.13)
-    static let panel = Color(white: 0.20)
-    static let panelHeader = Color(white: 0.30)
-    static let card = Color(white: 0.27)
-    static let cardHover = Color(white: 0.32)
-    static let border = Color.black.opacity(0.6)
-    static let text = Color(white: 0.95)
-    static let secondaryText = Color(white: 0.65)
-    static let up = Color.green
-    static let down = Color(red: 1.0, green: 0.45, blue: 0.45)
-    static let corner: CGFloat = 6
+    // Surfaces, darkest to lightest
+    static let background = Color(hex: 0x0F0F11)
+    static let surface = Color(hex: 0x17171A)
+    static let raised = Color(hex: 0x1E1E22)
+    static let hover = Color(hex: 0x26262B)
+
+    static let border = Color.white.opacity(0.07)
+    static let borderStrong = Color.white.opacity(0.13)
+
+    static let textPrimary = Color(hex: 0xEDEDEF)
+    static let textSecondary = Color(hex: 0xA1A1AA)
+    static let textTertiary = Color(hex: 0x6E6E78)
+
+    /// RSL claret, brightened to read on dark backgrounds.
+    static let accent = Color(hex: 0xD6304F)
+    static let positive = Color(hex: 0x4ADE80)
+    static let negative = Color(hex: 0xF87171)
+
+    static let radius: CGFloat = 12
+    static let rowRadius: CGFloat = 8
 }
 
-/// Rounded, bordered container used for every panel in the mockups.
-struct PanelBackground: ViewModifier {
-    var color: Color = Theme.panel
-
-    func body(content: Content) -> some View {
-        content
-            .background(color, in: RoundedRectangle(cornerRadius: Theme.corner))
-            .overlay(RoundedRectangle(cornerRadius: Theme.corner).stroke(Theme.border, lineWidth: 1.5))
+extension Color {
+    init(hex: UInt32, opacity: Double = 1) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255,
+            opacity: opacity
+        )
     }
 }
+
+// MARK: - Containers
 
 extension View {
-    func panel(_ color: Color = Theme.panel) -> some View {
-        modifier(PanelBackground(color: color))
+    /// Top-level panel: subtle surface with a hairline border.
+    func card() -> some View {
+        background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                    .strokeBorder(Theme.border)
+            )
     }
 }
 
-struct PanelHeader: View {
+struct SectionHeader<Trailing: View>: View {
     var title: String
-    var centered = false
-    var trailing: AnyView?
-
-    init(_ title: String, centered: Bool = false, trailing: AnyView? = nil) {
-        self.title = title
-        self.centered = centered
-        self.trailing = trailing
-    }
+    var count: Int?
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack {
-            if centered { Spacer() }
-            Text(title).font(.title3.weight(.medium))
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Theme.hover, in: Capsule())
+            }
             Spacer()
-            if let trailing { trailing }
+            trailing
         }
-        .foregroundStyle(Theme.text)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .frame(height: 48)
     }
 }
 
-/// Card style for list rows; brightens on hover.
-struct CardButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HoverCard(isPressed: configuration.isPressed) { configuration.label }
+extension SectionHeader where Trailing == EmptyView {
+    init(title: String, count: Int? = nil) {
+        self.init(title: title, count: count) { EmptyView() }
     }
+}
 
-    private struct HoverCard<Content: View>: View {
-        var isPressed: Bool
-        @ViewBuilder var content: Content
-        @State private var hovering = false
+/// Small uppercase label used to group items inside a panel.
+struct GroupLabel: View {
+    var text: String
 
-        var body: some View {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 11, weight: .semibold))
+            .kerning(0.6)
+            .foregroundStyle(Theme.textTertiary)
+    }
+}
+
+/// A row that highlights on hover. Selection draws an accent tint.
+struct HoverRow<Content: View>: View {
+    var isSelected = false
+    @ViewBuilder var content: (_ hovering: Bool) -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        content(hovering)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.rowRadius, style: .continuous)
+                    .fill(isSelected ? Theme.accent.opacity(0.10) : hovering ? Theme.hover : .clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.rowRadius, style: .continuous)
+                    .strokeBorder(isSelected ? Theme.accent.opacity(0.35) : .clear)
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+// MARK: - Buttons
+
+struct IconButton: View {
+    var systemName: String
+    var help: String
+    var role: ButtonRole?
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(hovering ? (role == .destructive ? Theme.negative : Theme.textPrimary) : Theme.textSecondary)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(hovering ? Color.white.opacity(0.08) : .clear)
+                )
                 .contentShape(Rectangle())
-                .panel(hovering || isPressed ? Theme.cardHover : Theme.card)
-                .onHover { hovering = $0 }
         }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering = $0 }
     }
 }
 
-struct ActionButtonStyle: ButtonStyle {
+struct PrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.callout)
-            .foregroundStyle(Theme.text)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(Color.black.opacity(configuration.isPressed ? 0.6 : 0.85), in: RoundedRectangle(cornerRadius: 4))
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Theme.accent.opacity(configuration.isPressed ? 0.8 : 1))
+            )
             .opacity(isEnabled ? 1 : 0.4)
+    }
+}
+
+struct SecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Theme.border)
+            )
+            .opacity(isEnabled ? 1 : 0.4)
+    }
+}
+
+// MARK: - Empty state
+
+struct EmptyState: View {
+    var title: String
+    var systemImage: String
+    var message: String?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(Theme.textTertiary)
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+            if let message {
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 }

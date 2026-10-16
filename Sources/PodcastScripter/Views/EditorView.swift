@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct EditorView: View {
@@ -6,19 +7,14 @@ struct EditorView: View {
 
     var body: some View {
         if let project = store.project(projectID) {
-            GeometryReader { geo in
-                HStack(spacing: 8) {
-                    ScriptEditor(project: project)
-                        .overlay(alignment: .bottomTrailing) {
-                            ClaudeButton().padding(12)
-                        }
-                    EditorSidebar(project: project)
-                        .frame(width: max(320, geo.size.width * 0.37))
-                }
+            HStack(spacing: 12) {
+                ScriptEditor(project: project)
+                EditorSidebar(project: project)
+                    .frame(width: 360)
             }
-            .padding(6)
+            .padding(12)
         } else {
-            ContentUnavailableView("Project not found", systemImage: "questionmark.folder")
+            EmptyState(title: "Project not found", systemImage: "questionmark.folder")
         }
     }
 }
@@ -26,26 +22,27 @@ struct EditorView: View {
 private struct ScriptEditor: View {
     @Environment(AppStore.self) private var store
     var project: Project
+    @State private var editingDetails = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Text("Project Name: \(project.displayTitle)")
-                    .font(.title3)
-                Spacer()
-                Button { ScriptExporter.export(project) } label: {
-                    Image(systemName: "square.and.arrow.down")
+            HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(project.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(project.episodeDate.formatted(date: .complete, time: .omitted))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
                 }
-                .buttonStyle(.plain)
-                .help("Download script")
-                .keyboardShortcut("s", modifiers: [.command, .shift])
+                Spacer()
+                IconButton(systemName: "pencil", help: "Edit details") { editingDetails = true }
+                IconButton(systemName: "arrow.down.doc", help: "Download script (⇧⌘S)") { ScriptExporter.export(project) }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
             }
-            .foregroundStyle(Theme.text)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Theme.panelHeader)
-            .padding(6)
+            .padding(.horizontal, 16)
+            .frame(height: 60)
+            Divider().overlay(Theme.border)
 
             TextEditor(text: Binding(
                 get: { project.script },
@@ -55,34 +52,41 @@ private struct ScriptEditor: View {
                     store.updateProject(updated, debounced: true)
                 }
             ))
-            .font(.system(size: 15))
-            .lineSpacing(4)
+            .font(.system(size: 16))
+            .lineSpacing(6)
             .scrollContentBackground(.hidden)
-            .foregroundStyle(Theme.text)
+            .foregroundStyle(Theme.textPrimary)
+            .frame(maxWidth: 760)
             .padding(.horizontal, 32)
-            .padding(.vertical, 8)
+            .padding(.vertical, 24)
             .overlay(alignment: .topLeading) {
                 if project.script.isEmpty {
                     Text("Start writing your script…")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Theme.secondaryText)
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.textTertiary)
                         .padding(.horizontal, 37)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 24)
                         .allowsHitTesting(false)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            HStack {
-                Text("\(project.wordCount) words · ~\(project.estimatedMinutes, specifier: "%.1f") min read")
+            Divider().overlay(Theme.border)
+            HStack(spacing: 14) {
+                Label("\(project.wordCount.formatted()) words", systemImage: "text.alignleft")
+                Label(String(format: "~%.1f min", project.estimatedMinutes), systemImage: "clock")
                 Spacer()
+                Text("Edited \(project.updatedAt.formatted(.relative(presentation: .named)))")
             }
-            .font(.caption)
-            .foregroundStyle(Theme.secondaryText)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 8)
-            .padding(.trailing, 70) // clear the Claude button
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.textTertiary)
+            .padding(.horizontal, 16)
+            .frame(height: 34)
         }
-        .panel(Color(white: 0.24))
+        .card()
+        .sheet(isPresented: $editingDetails) {
+            ProjectDetailsSheet(title: "Edit Project", project: project) { store.updateProject($0) }
+        }
     }
 }
 
@@ -92,59 +96,85 @@ private struct EditorSidebar: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 20) {
                 if !project.notes.isEmpty {
                     section("Project Notes") {
                         ForEach(project.notes) { note in
-                            card(title: note.title, detail: note.body, caption: note.kind.label)
+                            item(title: note.title, detail: note.body, meta: [note.kind.label, note.source].compactMap { $0 }.joined(separator: "  ·  "), url: note.url)
                         }
                     }
                 }
                 section("\(ShowConfig.teamName) News") {
-                    ForEach(store.news(in: .team)) { newsCard($0) }
+                    newsList(store.news(in: .team))
                 }
                 section("League News") {
-                    ForEach(store.news(in: .league)) { newsCard($0) }
+                    newsList(store.news(in: .league))
                 }
             }
-            .padding(14)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 8)
         }
-        .panel()
+        .card()
     }
 
-    private func newsCard(_ item: NewsItem) -> some View {
-        card(
-            title: item.headline,
-            detail: item.summary,
-            caption: "\(item.source) · \(item.publishedAt.formatted(.relative(presentation: .named)))"
+    @ViewBuilder
+    private func newsList(_ items: [NewsItem]) -> some View {
+        if items.isEmpty {
+            Text(store.connection == .connecting ? "Loading…" : "No news yet. Check the notes service connection.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.horizontal, 10)
+        } else {
+            ForEach(items) { newsItem($0) }
+        }
+    }
+
+    private func newsItem(_ news: NewsItem) -> some View {
+        item(
+            title: news.headline,
+            detail: news.summary,
+            meta: "\(news.source)  ·  \(news.publishedAt.formatted(.relative(presentation: .named)))",
+            url: news.url
         )
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(Theme.text)
-                .padding(.top, 6)
+        VStack(alignment: .leading, spacing: 4) {
+            GroupLabel(text: title)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
             content()
         }
     }
 
-    private func card(title: String, detail: String, caption: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.title3)
-            Text(detail)
-                .font(.callout)
-                .foregroundStyle(Theme.secondaryText)
-            Spacer(minLength: 0)
-            Text(caption)
-                .font(.caption)
-                .foregroundStyle(Theme.secondaryText)
+    private func item(title: String, detail: String, meta: String, url: URL?) -> some View {
+        HoverRow { hovering in
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer(minLength: 4)
+                    if url != nil {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .opacity(hovering ? 1 : 0)
+                    }
+                }
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(3)
+                }
+                Text(meta)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .padding(10)
         }
-        .foregroundStyle(Theme.text)
-        .textSelection(.enabled)
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
-        .panel(Theme.card)
+        .onTapGesture { if let url { NSWorkspace.shared.open(url) } }
+        .help(url == nil ? "" : "Open in browser")
     }
 }

@@ -3,3 +3,7 @@ build/
 .swiftpm/
 *.xcodeproj/xcuserdata/
 .DS_Store
+.env
+node_modules/
+services/notes/data/*
+!services/notes/data/.gitkeep
