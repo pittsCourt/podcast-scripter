@@ -269,7 +269,19 @@ function seasons() {
   return [...new Set([currentSeason(), ...saved])].sort((a, b) => b - a);
 }
 
-async function syncAll() {
+let inFlight = null;
+let scheduleInfo = null;
+const { getMeta, setMeta } = require('./schedule');
+
+/** Fetches every source. Overlapping calls (Sync button + schedule) share one run. */
+function syncAll() {
+  if (!inFlight) {
+    inFlight = runSync().finally(() => { inFlight = null; });
+  }
+  return inFlight;
+}
+
+async function runSync() {
   await Promise.all(SOURCES.map(async (source) => {
     try {
       const snaps = await source.fetch();
@@ -280,7 +292,12 @@ async function syncAll() {
       status.set(source.id, { checkedAt: new Date().toISOString(), error: err.message });
     }
   }));
+  setMeta('rankings.lastSyncAt', new Date().toISOString());
   return summary();
+}
+
+function setSchedule(info) {
+  scheduleInfo = info;
 }
 
 function summary(season = currentSeason()) {
@@ -289,6 +306,9 @@ function summary(season = currentSeason()) {
   return {
     season,
     seasons: seasons(),
+    lastSyncAt: getMeta('rankings.lastSyncAt'),
+    syncing: !!inFlight,
+    autoSync: scheduleInfo && scheduleInfo.description,
     sources: SOURCES.map((source) => {
       const history = rows.filter((r) => r.source === source.id).map((r) => ({
         date: r.date,
@@ -320,4 +340,4 @@ function summary(season = currentSeason()) {
   };
 }
 
-module.exports = { syncAll, summary, TFZ_ENTRY, parseChange };
+module.exports = { syncAll, summary, setSchedule, TFZ_ENTRY, parseChange };

@@ -58,7 +58,7 @@ curl -H "Authorization: Bearer $NOTES_TOKEN" -H "Content-Type: application/json"
 
 ## Power rankings
 
-`POST /api/rankings/sync` fetches RSL's rank from five sources and saves a dated snapshot of each in the `ranking_snapshots` table, tagged with its season (the calendar year). Snapshots are kept forever, and articles and emails already read are skipped. `GET /api/rankings?season=2026` returns one season (the current one by default): `season`, `seasons` (every season with data), and per source `latest`, `previousRank`, `history` and the last sync `error`. Nothing runs on a schedule. The Mac app syncs when it opens and when you click Sync.
+`POST /api/rankings/sync` fetches RSL's rank from five sources and saves a dated snapshot of each in the `ranking_snapshots` table, tagged with its season (the calendar year). Snapshots are kept forever, and articles and emails already read are skipped. `GET /api/rankings?season=2026` returns one season (the current one by default): `season`, `seasons` (every season with data), and per source `latest`, `previousRank`, `history` and the last sync `error`. The Mac app syncs when it opens and when you click Sync, and the inbox page has a **Sync now** button. The service also syncs once a week on `RANKINGS_SYNC_SCHEDULE` in `RANKINGS_SYNC_TZ`. The defaults are `Tue 16:00` in `UTC`, which is 10 a.m. MDT, when TacticsFreeZone's email has arrived. Using UTC keeps daylight saving from moving it: it's 9 a.m. when Mountain time is on MST. If the machine was asleep or the service was down at that time, it runs as soon as it's back. Set `RANKINGS_SYNC_SCHEDULE=` (empty) to turn it off.
 
 | Source | How | History |
 |---|---|---|

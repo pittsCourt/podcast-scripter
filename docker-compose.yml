@@ -16,4 +16,8 @@ services:
       GMAIL_USER: ${GMAIL_USER:-}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
       TFZ_FORWARDED_FROM: ${TFZ_FORWARDED_FROM:-}   # older issues forwarded in from another inbox
+      # Weekly automatic rankings sync ("" turns it off). TFZ's email is in by Tuesday 10 a.m. MDT.
+      # Kept in UTC so daylight saving doesn't move it: 16:00 UTC = 10 a.m. MDT / 9 a.m. MST.
+      RANKINGS_SYNC_SCHEDULE: ${RANKINGS_SYNC_SCHEDULE-Tue 16:00}
+      RANKINGS_SYNC_TZ: ${RANKINGS_SYNC_TZ:-UTC}
     restart: unless-stopped

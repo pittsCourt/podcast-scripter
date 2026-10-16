@@ -24,6 +24,7 @@ const { buildItem, HttpError } = require('./ingest');
 const { createAuth } = require('./auth');
 const { getStandings, getMatches } = require('./espn');
 const rankings = require('./rankings');
+const schedule = require('./schedule');
 const { version } = require('../package.json');
 
 const PORT = process.env.PORT || 3000;
@@ -168,6 +169,11 @@ function importLegacyPosts() {
 importLegacyPosts();
 feeds.seedDefaultFeeds();
 feeds.startScheduler(FEED_INTERVAL_MINUTES);
+rankings.setSchedule(schedule.startWeekly(
+  process.env.RANKINGS_SYNC_SCHEDULE ?? 'Tue 16:00', // 10 a.m. MDT, fixed in UTC so DST doesn't move it
+  process.env.RANKINGS_SYNC_TZ || 'UTC',
+  rankings.syncAll,
+));
 
 app.listen(PORT, () => {
   const modes = [auth.loginEnabled && 'login', auth.tokenEnabled && 'token'].filter(Boolean);

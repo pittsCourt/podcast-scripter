@@ -23,6 +23,8 @@ struct RankingsBanner: View {
             RankingsSyncButton()
         }
         .frame(height: 30)
+        // Extra room so the toolbar doesn't clip the last chip's text.
+        .padding(.horizontal, 25)
     }
 
     private var placeholder: String {

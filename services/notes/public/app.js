@@ -56,6 +56,7 @@ async function setStatus(item, status) {
   try {
     await api(`/api/items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
     load();
+loadRankings();
   } catch (err) {
     showMessage(err.message, true);
   }
@@ -66,6 +67,7 @@ async function remove(item) {
   try {
     await api(`/api/items/${item.id}`, { method: 'DELETE' });
     load();
+loadRankings();
   } catch (err) {
     showMessage(err.message, true);
   }
@@ -92,7 +94,66 @@ function card(item) {
 
 function render() {
   const counts = Object.fromEntries(Object.entries(FILTERS).map(([key, test]) => [key, items.filter(test).length]));
-  document.querySelectorAll('.tabs button').forEach((tab) => {
+  // --- power rankings ---
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function since(iso) {
+  if (!iso) return 'never';
+  return new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function renderRankings(summary) {
+  const chips = $('chips');
+  chips.replaceChildren();
+  for (const source of summary.sources) {
+    const chip = el('span', { className: 'chip' }, el('span', { className: 'src' }, source.name));
+    if (source.latest) {
+      chip.append(el('b', {}, ordinal(source.latest.rank)));
+      const change = source.previousRank != null ? source.previousRank - source.latest.rank : null;
+      if (change) chip.append(' ', el('span', { className: change > 0 ? 'up' : 'down' }, `${change > 0 ? '▲' : '▼'}${Math.abs(change)}`));
+      chip.title = `${source.latest.label || ''} · ${source.latest.date}`;
+    } else {
+      chip.append(el('b', {}, '—'));
+    }
+    if (source.error) {
+      chip.append(' ', el('span', { className: 'warn' }, '⚠'));
+      chip.title = `Last sync failed: ${source.error}`;
+    }
+    chips.append(chip);
+  }
+  const parts = [`Last synced ${since(summary.lastSyncAt)}`];
+  if (summary.autoSync) parts.push(`Auto-syncs ${summary.autoSync}`);
+  $('syncinfo').textContent = parts.join(' · ');
+}
+
+async function loadRankings() {
+  try {
+    renderRankings(await api('/api/rankings'));
+  } catch (err) {
+    $('syncinfo').textContent = err.message;
+  }
+}
+
+$('sync').onclick = async () => {
+  $('sync').disabled = true;
+  $('sync').textContent = 'Syncing…';
+  $('syncinfo').textContent = 'Checking MLS, ESPN, TacticsFreeZone (Gmail), Concacaf and Opta. This can take up to a minute.';
+  try {
+    renderRankings(await api('/api/rankings/sync', { method: 'POST' }));
+  } catch (err) {
+    $('syncinfo').textContent = `Sync failed: ${err.message}`;
+  } finally {
+    $('sync').disabled = false;
+    $('sync').textContent = 'Sync now';
+  }
+};
+
+document.querySelectorAll('.tabs button').forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.filter === filter);
     tab.querySelector('.n').textContent = counts[tab.dataset.filter];
   });
@@ -129,6 +190,65 @@ async function load() {
   }
 }
 
+// --- power rankings ---
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function since(iso) {
+  if (!iso) return 'never';
+  return new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function renderRankings(summary) {
+  const chips = $('chips');
+  chips.replaceChildren();
+  for (const source of summary.sources) {
+    const chip = el('span', { className: 'chip' }, el('span', { className: 'src' }, source.name));
+    if (source.latest) {
+      chip.append(el('b', {}, ordinal(source.latest.rank)));
+      const change = source.previousRank != null ? source.previousRank - source.latest.rank : null;
+      if (change) chip.append(' ', el('span', { className: change > 0 ? 'up' : 'down' }, `${change > 0 ? '▲' : '▼'}${Math.abs(change)}`));
+      chip.title = `${source.latest.label || ''} · ${source.latest.date}`;
+    } else {
+      chip.append(el('b', {}, '—'));
+    }
+    if (source.error) {
+      chip.append(' ', el('span', { className: 'warn' }, '⚠'));
+      chip.title = `Last sync failed: ${source.error}`;
+    }
+    chips.append(chip);
+  }
+  const parts = [`Last synced ${since(summary.lastSyncAt)}`];
+  if (summary.autoSync) parts.push(`Auto-syncs ${summary.autoSync}`);
+  $('syncinfo').textContent = parts.join(' · ');
+}
+
+async function loadRankings() {
+  try {
+    renderRankings(await api('/api/rankings'));
+  } catch (err) {
+    $('syncinfo').textContent = err.message;
+  }
+}
+
+$('sync').onclick = async () => {
+  $('sync').disabled = true;
+  $('sync').textContent = 'Syncing…';
+  $('syncinfo').textContent = 'Checking MLS, ESPN, TacticsFreeZone (Gmail), Concacaf and Opta. This can take up to a minute.';
+  try {
+    renderRankings(await api('/api/rankings/sync', { method: 'POST' }));
+  } catch (err) {
+    $('syncinfo').textContent = `Sync failed: ${err.message}`;
+  } finally {
+    $('sync').disabled = false;
+    $('sync').textContent = 'Sync now';
+  }
+};
+
 document.querySelectorAll('.tabs button').forEach((tab) => {
   tab.onclick = () => {
     filter = tab.dataset.filter;
@@ -147,6 +267,7 @@ $('add').addEventListener('submit', async (event) => {
     $('input').value = '';
     showMessage(`Added: ${item.title}`);
     load();
+loadRankings();
   } catch (err) {
     showMessage(err.message, true);
   } finally {
@@ -155,3 +276,4 @@ $('add').addEventListener('submit', async (event) => {
 });
 
 load();
+loadRankings();
