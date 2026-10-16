@@ -10,12 +10,14 @@ struct InfoSidebar: View {
         case table
         case matches
         case rankings
+        case ask
 
         var label: String {
             switch self {
             case .table: "Table"
             case .matches: "Matches"
             case .rankings: "Rankings"
+            case .ask: "Ask"
             }
         }
     }
@@ -38,6 +40,7 @@ struct InfoSidebar: View {
             case .table: StandingsView()
             case .matches: MatchesView()
             case .rankings: RankingsChartsView()
+            case .ask: AskView()
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -101,29 +104,56 @@ struct SidebarPlaceholder: View {
 
 struct MatchesView: View {
     @Environment(AppStore.self) private var store
+    /// A competition name, or `MatchesView.all`.
+    @AppStorage("matchesCompetition") private var filter = MatchesView.all
+
+    static let all = "All competitions"
 
     var body: some View {
         if let matches = store.matches {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if matches.stale {
-                        Text("Couldn't reach ESPN; showing the last synced matches.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.negative)
-                            .padding(.horizontal, 10)
+            let competitions = matches.competitions ?? Array(Set((matches.results + matches.upcoming).map(\.competition))).sorted()
+            let active = filter == Self.all || competitions.contains(filter) ? filter : Self.all
+            let keep = { (m: Match) in active == Self.all || m.competition == active }
+            let results = matches.results.filter(keep)
+            let upcoming = matches.upcoming.filter(keep)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Picker("Competition", selection: $filter) {
+                        Text(Self.all).tag(Self.all)
+                        Divider()
+                        ForEach(competitions, id: \.self) { Text($0).tag($0) }
                     }
-                    section("Upcoming", matches.upcoming, empty: "No upcoming matches scheduled.")
-                    section("Results", matches.results, empty: "No results yet this season.")
+                    .labelsHidden()
+                    .fixedSize()
+                    Spacer()
+                    RecordSummary(results: results)
                 }
-                .padding(.vertical, 14)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider().overlay(Theme.border)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if matches.stale {
+                            Text("Couldn't reach ESPN; showing the last synced matches.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.negative)
+                                .padding(.horizontal, 10)
+                        }
+                        section("Upcoming", upcoming, empty: "No upcoming \(active == Self.all ? "" : active + " ")matches scheduled.", showCompetition: active == Self.all)
+                        section("Results", results, empty: "No \(active == Self.all ? "" : active + " ")results this season.", showCompetition: active == Self.all)
+                    }
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 8)
+                }
             }
         } else {
             SidebarPlaceholder(what: "Matches", systemImage: "sportscourt")
         }
     }
 
-    private func section(_ title: String, _ items: [Match], empty: String) -> some View {
+    private func section(_ title: String, _ items: [Match], empty: String, showCompetition: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             GroupLabel(text: title)
                 .padding(.horizontal, 10)
@@ -135,9 +165,27 @@ struct MatchesView: View {
                     .padding(.horizontal, 10)
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, match in
-                    MatchRow(match: match, isNext: title == "Upcoming" && index == 0)
+                    MatchRow(match: match, isNext: title == "Upcoming" && index == 0, showCompetition: showCompetition, homeCompetition: store.config.homeCompetitionName)
                 }
             }
+        }
+    }
+}
+
+/// "12W 6D 15L" for the filtered results.
+private struct RecordSummary: View {
+    var results: [Match]
+
+    var body: some View {
+        let count = { (r: String) in results.filter { $0.result == r }.count }
+        if !results.isEmpty {
+            HStack(spacing: 6) {
+                Text("\(count("W"))W").foregroundStyle(Theme.positive)
+                Text("\(count("D"))D").foregroundStyle(Theme.textSecondary)
+                Text("\(count("L"))L").foregroundStyle(Theme.negative)
+            }
+            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+            .help("Record in the results shown (draws decided on penalties count as draws)")
         }
     }
 }
@@ -145,6 +193,9 @@ struct MatchesView: View {
 private struct MatchRow: View {
     var match: Match
     var isNext: Bool
+    var showCompetition: Bool
+    /// The team's own league (e.g. "MLS"); its matches aren't labeled outside special stages.
+    var homeCompetition: String
 
     var body: some View {
         HoverRow(isSelected: isNext) { _ in
@@ -172,10 +223,18 @@ private struct MatchRow: View {
                         Circle().fill(Color.white.opacity(0.06))
                     }
                     .frame(width: 18, height: 18)
-                    Text(match.opponent.shortName ?? match.opponent.name ?? "TBD")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(match.opponent.shortName ?? match.opponent.name ?? "TBD")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if let context {
+                            Text(context)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(match.competition == homeCompetition ? Theme.textTertiary : Theme.accent.opacity(0.9))
+                                .lineLimit(1)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -194,11 +253,18 @@ private struct MatchRow: View {
                 Text("\(goalsFor)–\(goalsAgainst)")
                     .font(.system(size: 13, weight: .semibold).monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
-                Text(result)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .foregroundStyle(resultColor(result))
-                    .frame(width: 20, height: 18)
-                    .background(resultColor(result).opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                VStack(spacing: 1) {
+                    Text(result)
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(resultColor(result))
+                        .frame(width: 20, height: 18)
+                        .background(resultColor(result).opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    if let shootout = match.shootout {
+                        Text("\(shootout) pens")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(resultColor(shootout))
+                    }
+                }
             }
         } else if let broadcast = match.broadcast {
             Text(broadcast)
@@ -216,8 +282,18 @@ private struct MatchRow: View {
         }
     }
 
+    /// "Leagues Cup · Quarterfinals" for cups; for the home league only non-regular stages ("MLS · Round One").
+    private var context: String? {
+        let stage = match.stage.flatMap { $0 == "Regular Season" ? nil : $0 }
+        if match.competition == homeCompetition {
+            return stage.map { "\(homeCompetition) · \($0)" }
+        }
+        guard showCompetition || stage != nil else { return nil }
+        return [showCompetition ? match.competition : nil, stage].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private var detail: String {
-        [match.opponent.name, match.venue, match.competition, match.broadcast]
+        [match.opponent.name, match.competition, match.stage, match.note, match.venue, match.broadcast]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")

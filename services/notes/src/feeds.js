@@ -8,26 +8,32 @@ const { normalizeUrl, clean } = require('./ingest');
 const KEEP_DAYS = 14;
 const FETCH_TIMEOUT_MS = 15000;
 
-// Google News search feeds are reliable and need no API key. Add or remove
-// feeds with the /api/feeds endpoints.
-const DEFAULT_FEEDS = [
-  {
-    title: 'Google News: Real Salt Lake',
-    category: 'team',
-    url: 'https://news.google.com/rss/search?q=%22Real+Salt+Lake%22&hl=en-US&gl=US&ceid=US:en',
-  },
-  {
-    title: 'Google News: MLS',
-    category: 'league',
-    url: 'https://news.google.com/rss/search?q=%22Major+League+Soccer%22+OR+MLS+soccer&hl=en-US&gl=US&ceid=US:en',
-  },
-];
+const config = require('./config');
+
+const GOOGLE_NEWS = 'https://news.google.com/rss/search';
+const googleNewsUrl = (query) => `${GOOGLE_NEWS}?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', textNodeName: '#text' });
 
-function seedDefaultFeeds() {
-  if (db.feedCount() === 0) DEFAULT_FEEDS.forEach(db.addFeed);
+/**
+ * Keeps one Google News search feed per category matching Settings (news.teamQuery /
+ * news.leagueQuery). Feeds added any other way are left alone.
+ */
+function syncDefaultFeeds(cfg = config.get()) {
+  const wanted = [
+    { category: 'team', query: cfg.news && cfg.news.teamQuery, title: `Google News: ${cfg.team.name}` },
+    { category: 'league', query: cfg.news && cfg.news.leagueQuery, title: 'Google News: league' },
+  ];
+  const existing = db.listFeeds();
+  for (const { category, query, title } of wanted) {
+    const managed = existing.filter((f) => f.category === category && f.url.startsWith(GOOGLE_NEWS));
+    const url = query ? googleNewsUrl(query) : null;
+    for (const feed of managed) if (feed.url !== url) db.deleteFeed(feed.id);
+    if (url && !managed.some((f) => f.url === url)) db.addFeed({ url, title, category });
+  }
 }
+
+const seedDefaultFeeds = () => syncDefaultFeeds();
 
 function text(value) {
   if (value == null) return '';
@@ -117,4 +123,4 @@ function startScheduler(minutes) {
   setInterval(run, minutes * 60000).unref();
 }
 
-module.exports = { seedDefaultFeeds, refreshAll, startScheduler, parseEntries };
+module.exports = { seedDefaultFeeds, syncDefaultFeeds, refreshAll, startScheduler, parseEntries };

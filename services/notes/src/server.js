@@ -10,6 +10,10 @@
 //   GET    /api/news?category=team|league&limit=20
 //   GET    /api/feeds | POST /api/feeds { url, title, category } | DELETE /api/feeds/:id
 //   POST   /api/feeds/refresh
+//   GET    /api/config | PUT /api/config | POST /api/config/reset | GET /api/config/defaults
+//   GET    /api/espn/teams?league=usa.1      -> teams for the Settings team picker
+//   GET    /api/ai/status | POST /api/ai/test   -> which Gemma provider is active, and a quick check
+//   POST   /api/ai/ask | suggest-story | briefing | intro-bullets -> the Gemma features
 //   GET    /api/standings?refresh=1          -> MLS conference tables + overall (ESPN, cached 30 min)
 //   GET    /api/matches?refresh=1            -> the club's recent results and upcoming matches (ESPN)
 //   GET    /api/rankings?season=2026         -> power rankings per source for a season (default: current)
@@ -22,9 +26,12 @@ const db = require('./db');
 const feeds = require('./feeds');
 const { buildItem, HttpError } = require('./ingest');
 const { createAuth } = require('./auth');
-const { getStandings, getMatches } = require('./espn');
+const { getStandings, getMatches, listTeams } = require('./espn');
 const rankings = require('./rankings');
 const schedule = require('./schedule');
+const config = require('./config');
+const ai = require('./ai');
+const assistant = require('./assistant');
 const { version } = require('../package.json');
 
 const PORT = process.env.PORT || 3000;
@@ -38,7 +45,8 @@ const auth = createAuth({
 
 const app = express();
 app.use(auth.middleware);
-app.use(express.json({ limit: '256kb' }));
+// Ask Gemma sends the app's scripts along with the question.
+app.use(express.json({ limit: '8mb' }));
 // iOS Shortcuts sometimes sends form bodies; accept both.
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -123,6 +131,50 @@ const espnRoute = (load, what) => wrap(async (req, res) => {
 app.get('/api/standings', espnRoute(getStandings, 'standings'));
 app.get('/api/matches', espnRoute(getMatches, 'matches'));
 
+// --- settings (show, template, team, sources) ---
+app.get('/api/config', wrap((req, res) => res.json(config.get())));
+app.put('/api/config', wrap((req, res) => {
+  try {
+    res.json(config.save(req.body || {}));
+  } catch (err) {
+    throw new HttpError(err.status || 500, err.message);
+  }
+}));
+app.post('/api/config/reset', wrap((req, res) => res.json(config.reset())));
+app.get('/api/config/defaults', wrap((req, res) => res.json(config.defaults())));
+app.get('/api/espn/teams', wrap(async (req, res) => {
+  const league = req.query.league || config.get().team.espnLeague;
+  if (!/^[a-z0-9.]+$/i.test(league)) throw new HttpError(400, 'league must be an ESPN league code like usa.1');
+  try {
+    res.json(await listTeams(league));
+  } catch (err) {
+    throw new HttpError(502, `Couldn't load teams for ${league}: ${err.message}`);
+  }
+}));
+
+// --- Gemma ---
+app.get('/api/ai/status', wrap((req, res) => res.json(ai.status())));
+// Each feature: the app sends its data (scripts, tracker); the service adds its own and asks Gemma.
+const aiRoute = (fn) => wrap(async (req, res) => {
+  try {
+    res.json(await fn(req.body || {}));
+  } catch (err) {
+    throw new HttpError(err.status || 502, err.message);
+  }
+});
+app.post('/api/ai/ask', aiRoute(assistant.ask));
+app.post('/api/ai/suggest-story', aiRoute(assistant.suggestStory));
+app.post('/api/ai/briefing', aiRoute(assistant.briefing));
+app.post('/api/ai/intro-bullets', aiRoute(assistant.introBullets));
+app.post('/api/ai/test', wrap(async (req, res) => {
+  try {
+    const reply = await ai.generate({ prompt: 'Reply with exactly: Ready to help with the show.', temperature: 0 });
+    res.json({ ok: true, ...reply });
+  } catch (err) {
+    throw new HttpError(502, err.message);
+  }
+}));
+
 app.get('/api/rankings', wrap((req, res) => {
   const season = req.query.season ? Number(req.query.season) : undefined;
   if (season !== undefined && !Number.isInteger(season)) throw new HttpError(400, 'season must be a year, e.g. 2026.');
@@ -169,11 +221,14 @@ function importLegacyPosts() {
 importLegacyPosts();
 feeds.seedDefaultFeeds();
 feeds.startScheduler(FEED_INTERVAL_MINUTES);
-rankings.setSchedule(schedule.startWeekly(
-  process.env.RANKINGS_SYNC_SCHEDULE ?? 'Tue 16:00', // 10 a.m. MDT, fixed in UTC so DST doesn't move it
-  process.env.RANKINGS_SYNC_TZ || 'UTC',
-  rankings.syncAll,
-));
+const startRankingsSchedule = (cfg) => rankings.setSchedule(
+  schedule.startWeekly(cfg.rankings.schedule, cfg.rankings.timeZone || 'UTC', rankings.syncAll),
+);
+startRankingsSchedule(config.get());
+config.onChange((cfg) => {
+  startRankingsSchedule(cfg);
+  feeds.syncDefaultFeeds(cfg);
+});
 
 app.listen(PORT, () => {
   const modes = [auth.loginEnabled && 'login', auth.tokenEnabled && 'token'].filter(Boolean);

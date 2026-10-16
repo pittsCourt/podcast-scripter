@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
+COPY config.default.json ./
 COPY src ./src
 COPY public ./public
 

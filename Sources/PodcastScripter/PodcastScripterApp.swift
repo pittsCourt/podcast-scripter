@@ -7,7 +7,7 @@ struct PodcastScripterApp: App {
     @State private var store = AppStore()
 
     var body: some Scene {
-        WindowGroup(ShowConfig.showName) {
+        WindowGroup("Podcast Scripter") {
             ContentView()
                 .environment(store)
                 .frame(minWidth: 1240, minHeight: 680)
@@ -15,6 +15,7 @@ struct PodcastScripterApp: App {
                 .tint(Theme.accent)
                 .task {
                     // The sidebar syncs once on open; the queue keeps checking for phone shares.
+                    await store.loadConfig()
                     async let sidebar: Void = store.syncSidebar(force: false)
                     async let rankings: Void = store.syncRankings()
                     async let queue: Void = store.runRefreshLoop()
@@ -123,7 +124,7 @@ struct ContentView: View {
         if case .editor(let id) = store.route, let project = store.project(id) {
             return project.name
         }
-        return ShowConfig.showName
+        return store.config.show.name
     }
 
     private var subtitle: String {
@@ -138,6 +139,11 @@ private struct UserMenu: View {
     var body: some View {
         Menu {
             Text("Local user")
+            Divider()
+            // Opens the Settings window (also ⌘, and the app menu).
+            SettingsLink {
+                Label("Project Settings…", systemImage: "gearshape")
+            }
             Divider()
             Button("Reveal Data in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([AppStore.defaultFileURL])

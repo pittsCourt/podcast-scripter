@@ -70,6 +70,39 @@ struct TrackedStory: Identifiable, Codable, Hashable {
     var title: String
     var latestUpdate: String = ""
     var lastUpdated = Date()
+    /// What was said about it in scripts, oldest first (tagged in the editor).
+    var mentions: [StoryMention] = []
+
+    init(id: UUID = UUID(), title: String, latestUpdate: String = "", lastUpdated: Date = Date(), mentions: [StoryMention] = []) {
+        self.id = id
+        self.title = title
+        self.latestUpdate = latestUpdate
+        self.lastUpdated = lastUpdated
+        self.mentions = mentions
+    }
+
+    // Written by hand so stories saved before `mentions` existed still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        latestUpdate = try c.decodeIfPresent(String.self, forKey: .latestUpdate) ?? ""
+        lastUpdated = try c.decodeIfPresent(Date.self, forKey: .lastUpdated) ?? Date()
+        mentions = try c.decodeIfPresent([StoryMention].self, forKey: .mentions) ?? []
+    }
+}
+
+/// A passage from a script tagged as part of a tracked story.
+struct StoryMention: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var projectID: Project.ID
+    /// Copied so the history still reads well if the project is renamed or deleted.
+    var projectName: String
+    var episodeDate: Date
+    var excerpt: String
+    /// Optional takeaway, e.g. "Expected back after the international break".
+    var note: String?
+    var taggedAt = Date()
 }
 
 /// Power rankings from the notes service's /api/rankings: one entry per source, with season history.
@@ -154,7 +187,10 @@ struct StandingsRow: Decodable, Equatable, Sendable, Identifiable {
 
 /// The club's results and fixtures from the notes service's /api/matches.
 struct Matches: Decodable, Equatable, Sendable {
+    var season: Int?
     var team: MatchTeam
+    /// Competitions with matches this season, e.g. ["MLS", "Leagues Cup"].
+    var competitions: [String]?
     var results: [Match]
     var upcoming: [Match]
     var updatedAt: String
@@ -165,7 +201,12 @@ struct Match: Decodable, Equatable, Sendable, Identifiable {
     var id: String
     /// ISO 8601 kickoff time.
     var date: String
+    /// "MLS", "Leagues Cup", "U.S. Open Cup" or "Concacaf Champions Cup".
     var competition: String
+    /// e.g. "Regular Season", "League Phase", "Quarterfinals".
+    var stage: String?
+    /// e.g. "Tigres UANL win 6-5 on penalties".
+    var note: String?
     var venue: String?
     var broadcast: String?
     var isHome: Bool
@@ -174,6 +215,8 @@ struct Match: Decodable, Equatable, Sendable, Identifiable {
     var goalsAgainst: Int?
     /// "W", "D" or "L" once played.
     var result: String?
+    /// "W" or "L" when a draw went to penalties.
+    var shootout: String?
     var status: String
 
     var kickoff: Date? { ISO8601.parse(date) ?? ISO8601.parse(date.replacingOccurrences(of: "Z", with: ":00Z")) }

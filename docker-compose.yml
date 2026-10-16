@@ -15,9 +15,14 @@ services:
       # Power rankings: TacticsFreeZone arrives by email, read from Gmail over IMAP.
       GMAIL_USER: ${GMAIL_USER:-}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      # Gemma through the Gemini API (Google AI Studio key). Not needed for a local Ollama model.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       TFZ_FORWARDED_FROM: ${TFZ_FORWARDED_FROM:-}   # older issues forwarded in from another inbox
       # Weekly automatic rankings sync ("" turns it off). TFZ's email is in by Tuesday 10 a.m. MDT.
       # Kept in UTC so daylight saving doesn't move it: 16:00 UTC = 10 a.m. MDT / 9 a.m. MST.
       RANKINGS_SYNC_SCHEDULE: ${RANKINGS_SYNC_SCHEDULE-Tue 16:00}
       RANKINGS_SYNC_TZ: ${RANKINGS_SYNC_TZ:-UTC}
+    # Lets the container reach a local Ollama on the host (needed on Linux; built in on Docker Desktop).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

@@ -51,11 +51,17 @@ function describe(schedule, timeZone) {
   return `${day}s at ${time} (${timeZone})`;
 }
 
+let timers = [];
+
 /**
- * Runs `job` on the weekly schedule. Returns info for the API.
- * @param {string} text  e.g. "Tue 10:00"; empty disables it
+ * Runs `job` on the weekly schedule, replacing any previous schedule (Settings can change it).
+ * Returns info for the API.
+ * @param {string} text  e.g. "Tue 16:00"; empty disables it
  */
 function startWeekly(text, timeZone, job) {
+  timers.forEach(clearTimeout);
+  timers.forEach(clearInterval);
+  timers = [];
   const schedule = parseSchedule(text);
   const info = { description: describe(schedule, timeZone), timeZone };
   if (!schedule) {
@@ -67,9 +73,12 @@ function startWeekly(text, timeZone, job) {
     const slot = latestSlot(schedule, timeZone);
     const last = getMeta('rankings.lastScheduledSlot');
     if (last === slot) return;
-    if (!last) {
-      // First start: record the current slot instead of syncing immediately.
+    const spec = `${text} ${timeZone}`;
+    if (!last || getMeta('rankings.scheduleSpec') !== spec) {
+      // First start, or the schedule was just changed: start counting from now
+      // instead of treating the new slot as a missed run.
       setMeta('rankings.lastScheduledSlot', slot);
+      setMeta('rankings.scheduleSpec', spec);
       return;
     }
     setMeta('rankings.lastScheduledSlot', slot);
@@ -81,8 +90,8 @@ function startWeekly(text, timeZone, job) {
     }
   };
 
-  setTimeout(tick, 5000);
-  setInterval(tick, 60000).unref();
+  timers.push(setTimeout(tick, 5000));
+  timers.push(setInterval(tick, 60000).unref());
   console.log(`rankings auto-sync: ${info.description}`);
   return info;
 }

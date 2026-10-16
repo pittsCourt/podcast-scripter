@@ -5,9 +5,11 @@ import SwiftUI
 /// Rank 1 is at the top; hover a chart to read any week.
 struct RankingsChartsView: View {
     @Environment(AppStore.self) private var store
-    /// nil = the current season.
-    @State private var season: Int?
+    /// 0 = the current season. Remembered between launches.
+    @AppStorage("rankingsSeason") private var savedSeason = 0
     @State private var past: RankingsSummary?
+
+    private var season: Int? { savedSeason == 0 ? nil : savedSeason }
 
     private var shown: RankingsSummary? {
         guard let season, season != store.rankings?.season else { return store.rankings }
@@ -15,6 +17,14 @@ struct RankingsChartsView: View {
     }
 
     var body: some View {
+        content
+            .task(id: savedSeason) {
+                if let season, past?.season != season { past = await store.rankings(for: season) }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let summary = shown, !summary.sources.isEmpty {
             ScrollView {
                 VStack(spacing: 10) {
@@ -45,7 +55,7 @@ struct RankingsChartsView: View {
                 Picker("Season", selection: Binding(
                     get: { season ?? summary.season },
                     set: { picked in
-                        season = picked
+                        savedSeason = picked == store.rankings?.season ? 0 : picked
                         Task { past = await store.rankings(for: picked) }
                     }
                 )) {

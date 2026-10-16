@@ -17,6 +17,17 @@ final class RichTextController {
 
     /// Drives the link sheet; set by ⌘K or the link button.
     var isEditingLink = false
+    /// Drives the "Track as Story" sheet; holds the passage being tagged.
+    var taggingExcerpt: String?
+
+    /// Opens the Track as Story sheet for the selected text.
+    func beginTagging() {
+        let text = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        taggingExcerpt = text
+    }
+
+    private(set) var hasSelection = false
 
     // MARK: Paragraph styles
 
@@ -171,6 +182,27 @@ final class RichTextController {
         insertParagraphs(quote)
     }
 
+    /// Replaces the template's "[Bullet 1]"–"[Bullet 3]" placeholders with `bullets`, keeping their
+    /// formatting. If the placeholders are gone, inserts the bullets at the cursor instead.
+    func fillBullets(_ bullets: [String]) {
+        guard let textView, let storage = textView.textStorage else { return }
+        var replaced = 0
+        for (index, bullet) in bullets.enumerated() {
+            let range = (storage.string as NSString).range(of: "[Bullet \(index + 1)]")
+            guard range.location != NSNotFound, textView.shouldChangeText(in: range, replacementString: bullet) else { continue }
+            storage.replaceCharacters(in: range, with: bullet)
+            textView.didChangeText()
+            replaced += 1
+        }
+        if replaced == 0 {
+            insertParagraphs(NSAttributedString(
+                string: bullets.map { "• \($0)\n" }.joined(),
+                attributes: ScriptStyle.attributes(for: .body, indentLevel: 1)
+            ))
+        }
+        updateState()
+    }
+
     /// Inserts `text` as body paragraphs at the cursor.
     func insertBody(_ text: String) {
         insertParagraphs(NSAttributedString(string: text + "\n", attributes: ScriptStyle.attributes(for: .body)))
@@ -213,6 +245,7 @@ final class RichTextController {
     func updateState() {
         guard let textView, let storage = textView.textStorage else { return }
         let range = textView.selectedRange()
+        hasSelection = range.length > 0
         let attrs: [NSAttributedString.Key: Any]
         if range.length > 0 {
             attrs = storage.attributes(at: range.location, effectiveRange: nil)
@@ -358,6 +391,20 @@ struct RichTextEditor: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             parent.controller.updateState()
         }
+
+        /// Adds "Track as Story…" to the right-click menu when text is selected.
+        func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            guard view.selectedRange().length > 0 else { return menu }
+            let item = NSMenuItem(title: "Track as Story…", action: #selector(trackStory), keyEquivalent: "")
+            item.target = self
+            menu.insertItem(item, at: 0)
+            menu.insertItem(.separator(), at: 1)
+            return menu
+        }
+
+        @objc private func trackStory() {
+            parent.controller.beginTagging()
+        }
     }
 }
 
@@ -403,6 +450,8 @@ struct FormatCommands: Commands {
                     .keyboardShortcut("[", modifiers: [.command, .option])
             }
             Section {
+                Button("Track as Story…") { controller?.beginTagging() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
                 Button("Add Link…") { controller?.isEditingLink = true }
                     .keyboardShortcut("k")
                 Button("Clear Formatting") { controller?.clearFormatting() }

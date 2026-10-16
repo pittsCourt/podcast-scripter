@@ -52,7 +52,7 @@ struct NewsPanel: View {
     var category: NewsCategory
 
     private var title: String {
-        category == .team ? "\(ShowConfig.teamName) News" : "League News"
+        category == .team ? "\(store.config.team.shortName) News" : "League News"
     }
 
     var body: some View {
@@ -260,7 +260,7 @@ private struct ConnectionIndicator: View {
     }
 }
 
-private struct Checkbox: View {
+struct Checkbox: View {
     var isOn: Bool
 
     var body: some View {
@@ -414,6 +414,12 @@ private struct TrackedStoryRow: View {
                         .font(.system(size: 12))
                         .foregroundStyle(story.latestUpdate.isEmpty ? Theme.textTertiary : Theme.textSecondary)
                         .lineLimit(2)
+                    if let last = story.mentions.last {
+                        Text("\(story.mentions.count) \(story.mentions.count == 1 ? "mention" : "mentions")  ·  last in \(last.projectName), \(last.episodeDate.formatted(.dateTime.month(.abbreviated).day()))")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Text(story.lastUpdated.formatted(.relative(presentation: .named)))
@@ -438,11 +444,35 @@ private struct TrackedStorySheet: View {
                 TextField("Story", text: $story.title)
                 TextField("Latest update", text: $story.latestUpdate, axis: .vertical)
                     .lineLimit(4...10)
+                if !story.mentions.isEmpty {
+                    Section("What you’ve said (\(story.mentions.count))") {
+                        ForEach(story.mentions.reversed()) { mention in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\(mention.projectName)  ·  \(mention.episodeDate.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Text("“\(mention.excerpt)”")
+                                    .font(.system(size: 12))
+                                    .italic()
+                                if let note = mention.note {
+                                    Text(note).font(.system(size: 12))
+                                }
+                            }
+                            .padding(.vertical, 2)
+                            .contextMenu {
+                                Button("Remove Mention", role: .destructive) {
+                                    story.mentions.removeAll { $0.id == mention.id }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             .formStyle(.grouped)
+            .frame(maxHeight: 520)
             SheetButtons(confirmTitle: "Save", canConfirm: true) { onSave(story) }
         }
-        .frame(width: 460)
+        .frame(width: 500)
     }
 }
 

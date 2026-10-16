@@ -13,7 +13,10 @@
 const { decodeHtmlEntities, stripTags } = require('./parseTweet');
 const db = require('./db');
 
-const TEAM_NAME = process.env.RANKINGS_TEAM_NAME || 'Real Salt Lake';
+const config = require('./config');
+/** Settings are read on every sync, so changes apply without a restart. */
+const teamName = () => config.get().team.name;
+const sourceSettings = (id) => (config.get().rankings.sources || {})[id] || {};
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 const TIMEOUT_MS = 30000;
 
@@ -49,6 +52,12 @@ const SOURCES = [
 ];
 
 const status = new Map(); // source id -> { checkedAt, error }
+
+/** Sources switched on in Settings. */
+const enabledSources = () => SOURCES.filter((source) => sourceSettings(source.id).enabled !== false);
+const espnQuery = () => escape(sourceSettings('espn').query || 'MLS Power Rankings');
+/** Escapes text for use inside a RegExp (team names like "St. Louis"). */
+const escape = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // --- helpers ---
 
@@ -97,7 +106,7 @@ async function fetchMLS() {
     const published = (html.match(/"datePublished":"([^"]+)"/) || [])[1];
     if (!published || published < seasonStart()) continue;
     const teams = [...html.matchAll(/mls-c-ranking-header__title">\s*([^<]+?)\s*</g)].map((m) => text(m[1]));
-    const index = teams.findIndex((t) => t === TEAM_NAME);
+    const index = teams.findIndex((t) => t === teamName());
     if (teams.length < 20 || index === -1) continue; // not a full 1-30 list
     const title = text((html.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '');
     snaps.push({ date: day(published), rank: index + 1, url, label: title.replace(/\s*\|.*$/, '') });
@@ -108,9 +117,10 @@ async function fetchMLS() {
 // --- ESPN ---
 
 async function fetchESPN() {
-  const search = await get('https://site.web.api.espn.com/apis/search/v2?query=MLS%20Power%20Rankings&limit=50&type=article', { json: true });
+  const query = encodeURIComponent(sourceSettings('espn').query || 'MLS Power Rankings');
+  const search = await get(`https://site.web.api.espn.com/apis/search/v2?query=${query}&limit=50&type=article`, { json: true });
   const articles = (search.results || []).flatMap((r) => r.contents || [])
-    .filter((a) => /^MLS Power Rankings/i.test(a.displayName || '') && (a.date || '') >= seasonStart());
+    .filter((a) => new RegExp(`^${espnQuery()}`, 'i').test(a.displayName || '') && (a.date || '') >= seasonStart());
   const known = knownUrls('espn');
   const snaps = [];
   for (const article of articles) {
@@ -118,14 +128,14 @@ async function fetchESPN() {
     if (known.has(url)) continue;
     const story = await get(`https://content.core.api.espn.com/v1/sports/news/${article.id}`, { json: true });
     const body = text((story.headlines && story.headlines[0] && story.headlines[0].story) || '');
-    const m = body.match(new RegExp(`\\b(\\d{1,2})\\.\\s*${TEAM_NAME}\\b(?:.{0,200}?Previous ranking:\\s*(\\d{1,2}))?`));
+    const m = body.match(new RegExp(`\\b(\\d{1,2})\\.\\s*${escape(teamName())}\\b(?:.{0,200}?Previous ranking:\\s*(\\d{1,2}))?`));
     if (!m) continue;
     snaps.push({
       date: day(article.date),
       rank: Number(m[1]),
       previousRank: m[2] ? Number(m[2]) : null,
       url,
-      label: article.displayName.replace(/^MLS Power Rankings:\s*/i, ''),
+      label: article.displayName.replace(new RegExp(`^${espnQuery()}:\\s*`, 'i'), ''),
     });
   }
   return snaps;
@@ -136,9 +146,9 @@ async function fetchESPN() {
 // Entries as written across the season (Gmail's text of a forward shows bold as *...*):
 //   "29. Real Salt Lake (-):"   "27. *Real Salt Lake (-1)*"   "11. *Real Salt Lake* (+3):"
 //   "14. *Real Salt Lake* (⬆️ 10):"   "8. *RSL* (-1):"   "25. *Real Salt Lake*:" (week 1, no change)
-const TEAM_ALIASES = [TEAM_NAME, ...(process.env.RANKINGS_TEAM_ALIASES || 'RSL').split(',').map((a) => a.trim()).filter(Boolean)];
-const TFZ_ENTRY = new RegExp(
-  `\\b(\\d{1,2})\\.\\s*[*_]*\\s*(?:${TEAM_ALIASES.join('|')})\\b\\s*[*_]*\\s*(?:\\(([^)]*)\\))?\\s*[*_]*\\s*:`,
+const teamAliases = () => [teamName(), ...(config.get().team.aliases || [])].filter(Boolean).map(escape);
+const tfzEntry = () => new RegExp(
+  `\\b(\\d{1,2})\\.\\s*[*_]*\\s*(?:${teamAliases().join('|')})\\b\\s*[*_]*\\s*(?:\\(([^)]*)\\))?\\s*[*_]*\\s*:`,
 );
 
 /** "+2" / "⬆️ 2" = up two, "-3" / "⬇️ 3" = down three, "-" = no change, none / "NR" = unknown. */
@@ -161,9 +171,9 @@ async function fetchTFZ() {
   const { ImapFlow } = require('imapflow');
   const { simpleParser } = require('mailparser');
   const client = new ImapFlow({ host: 'imap.gmail.com', port: 993, secure: true, auth: { user, pass }, logger: false });
-  const sender = process.env.TFZ_SENDER || 'tacticsfreezone@ghost.io';
+  const sender = sourceSettings('tfz').sender || 'tacticsfreezone@ghost.io';
   // Older issues forwarded in from another inbox count too (comma-separated addresses).
-  const forwarders = (process.env.TFZ_FORWARDED_FROM || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const forwarders = (sourceSettings('tfz').forwardedFrom || []).map((s) => s.trim()).filter(Boolean);
   const fromQuery = [sender, ...forwarders].map((a) => `from:${a}`).join(' OR ');
   const known = knownUrls('tfz');
   const snaps = [];
@@ -187,7 +197,7 @@ async function fetchTFZ() {
         const sentOn = forwarded
           ? new Date(forwarded[2].replace(/^[A-Za-z]{3},\s*/, '').replace(/\s+at\s+/, ' '))
           : parsed.date || message.envelope.date;
-        const m = body.match(TFZ_ENTRY);
+        const m = body.match(tfzEntry());
         if (!m) continue;
         const rank = Number(m[1]);
         const change = parseChange(m[2]);
@@ -214,8 +224,8 @@ async function fetchTFZ() {
 async function fetchConcacaf() {
   const html = await get('https://www.hypercube.nl/CCR/ranking.php?type=Club');
   const cells = html.split(/<\/t[dh]>/i).map((c) => text(c)).filter(Boolean);
-  const at = cells.findIndex((c) => c === TEAM_NAME);
-  if (at === -1) throw new Error(`${TEAM_NAME} isn’t in the Concacaf ranking table.`);
+  const at = cells.findIndex((c) => c === teamName());
+  if (at === -1) throw new Error(`${teamName()} isn’t in the Concacaf ranking table.`);
   // Row: rank | club | country | league | points | change
   const before = cells.slice(Math.max(0, at - 3), at).reverse().find((c) => /^\d+$/.test(c));
   const after = cells.slice(at + 1, at + 6);
@@ -239,7 +249,7 @@ async function fetchOpta() {
   if (!res.ok) throw new Error(`HTTP ${res.status} from Opta`);
   const updated = res.headers.get('last-modified');
   const js = await res.text();
-  const at = js.indexOf(`"contestantName":"${TEAM_NAME}"`);
+  const at = js.indexOf(`"contestantName":"${teamName()}"`);
   if (at === -1) throw new Error('Couldn’t find the team in Opta’s data (their page may have changed).');
   const record = js.slice(js.lastIndexOf('{', at), js.indexOf('}', at) + 1);
   const field = (name) => {
@@ -282,7 +292,7 @@ function syncAll() {
 }
 
 async function runSync() {
-  await Promise.all(SOURCES.map(async (source) => {
+  await Promise.all(enabledSources().map(async (source) => {
     try {
       const snaps = await source.fetch();
       snaps.forEach((s) => save(source.id, s));
@@ -309,7 +319,7 @@ function summary(season = currentSeason()) {
     lastSyncAt: getMeta('rankings.lastSyncAt'),
     syncing: !!inFlight,
     autoSync: scheduleInfo && scheduleInfo.description,
-    sources: SOURCES.map((source) => {
+    sources: enabledSources().map((source) => {
       const history = rows.filter((r) => r.source === source.id).map((r) => ({
         date: r.date,
         rank: r.rank,
@@ -340,4 +350,4 @@ function summary(season = currentSeason()) {
   };
 }
 
-module.exports = { syncAll, summary, setSchedule, TFZ_ENTRY, parseChange };
+module.exports = { syncAll, summary, setSchedule, tfzEntry, parseChange, SOURCES };

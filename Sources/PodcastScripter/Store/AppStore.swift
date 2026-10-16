@@ -24,11 +24,32 @@ private struct PersistedState: Codable {
     var projects: [Project] = []
     var storyQueue: [StoryItem] = []
     var trackedStories: [TrackedStory] = []
+    /// Last settings seen from the notes service.
+    var config: AppConfig?
+
+    init(projects: [Project] = [], storyQueue: [StoryItem] = [], trackedStories: [TrackedStory] = [], config: AppConfig? = nil) {
+        self.projects = projects
+        self.storyQueue = storyQueue
+        self.trackedStories = trackedStories
+        self.config = config
+    }
+
+    // A settings copy from an older version must never stop projects from loading.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try c.decodeIfPresent([Project].self, forKey: .projects) ?? []
+        storyQueue = try c.decodeIfPresent([StoryItem].self, forKey: .storyQueue) ?? []
+        trackedStories = try c.decodeIfPresent([TrackedStory].self, forKey: .trackedStories) ?? []
+        config = try? c.decodeIfPresent(AppConfig.self, forKey: .config)
+    }
 }
 
 @MainActor
 @Observable
 final class AppStore {
+    /// Show, template, team and source settings (from the notes service; cached for offline use).
+    var config: AppConfig = .fallback
+
     // Persisted. `storyQueue` mirrors the notes service inbox and is cached for offline use.
     var projects: [Project] = []
     var storyQueue: [StoryItem] = []
@@ -48,7 +69,17 @@ final class AppStore {
     var connection: ConnectionState = .connecting
 
     // UI state
-    var route: Route = .home
+    /// The open screen. Remembered so the app reopens where you left off.
+    var route: Route = .home {
+        didSet {
+            if case .editor(let id) = route {
+                UserDefaults.standard.set(id.uuidString, forKey: Self.lastProjectKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.lastProjectKey)
+            }
+        }
+    }
+    private static let lastProjectKey = "lastOpenProject"
     var searchText = ""
     /// Selected story-queue items and news stories (their IDs never collide).
     var selectedStoryIDs: Set<UUID> = []
@@ -62,6 +93,10 @@ final class AppStore {
         self.service = service ?? NotesServiceClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
         self.fileURL = fileURL
         load()
+        if let saved = UserDefaults.standard.string(forKey: Self.lastProjectKey),
+           let id = UUID(uuidString: saved), project(id) != nil {
+            route = .editor(id)
+        }
     }
 
     /// Call after the service URL or token changes in Settings.
@@ -95,6 +130,7 @@ final class AppStore {
             projects = state.projects
             storyQueue = state.storyQueue
             trackedStories = state.trackedStories
+            if let saved = state.config { config = saved }
         } catch {
             lastError = "Couldn't read saved data: \(error.localizedDescription)"
         }
@@ -118,6 +154,124 @@ final class AppStore {
         } catch {
             connection = .offline(reason: error.localizedDescription)
         }
+    }
+
+    // MARK: - Settings
+
+    /// Refreshes settings from the notes service; keeps the cached copy if it can't be reached.
+    func loadConfig() async {
+        guard let latest = try? await service.fetchConfig(), latest != config else { return }
+        config = latest
+        save()
+    }
+
+    /// Saves settings to the notes service, then re-syncs everything that depends on the team.
+    func saveConfig(_ updated: AppConfig) async throws {
+        let teamChanged = updated.team != config.team || updated.competitions != config.competitions
+        config = try await service.saveConfig(updated)
+        save()
+        if teamChanged {
+            standings = nil
+            matches = nil
+            async let sidebar: Void = syncSidebar(force: true)
+            async let queue: Void = refresh()
+            _ = await (sidebar, queue)
+        }
+    }
+
+    func resetConfig() async throws {
+        config = try await service.resetConfig()
+        save()
+        await syncSidebar(force: true)
+    }
+
+    // MARK: - Gemma
+
+    /// The Ask Gemma conversation (kept while the app is open).
+    var chat: [ChatMessage] = []
+    var isAsking = false
+
+    private static func isoDay(_ date: Date) -> String {
+        date.formatted(.iso8601.year().month().day())
+    }
+
+    func aiStory(_ story: TrackedStory) -> AIStory {
+        AIStory(
+            id: story.id.uuidString,
+            title: story.title,
+            latestUpdate: story.latestUpdate,
+            mentions: story.mentions.map {
+                AIMention(episode: $0.projectName, date: Self.isoDay($0.episodeDate), excerpt: $0.excerpt, note: $0.note)
+            }
+        )
+    }
+
+    func aiEpisode(_ project: Project, includeScript: Bool = false) -> AIEpisode {
+        AIEpisode(
+            name: project.name,
+            date: Self.isoDay(project.episodeDate),
+            script: includeScript ? project.script : nil,
+            stories: includeScript ? project.notes.map { AIEpisodeStory(kind: $0.kind.rawValue, title: $0.title, body: $0.body) } : nil
+        )
+    }
+
+    /// Everything only the app knows, for Ask Gemma.
+    var aiAppContext: AIAppContext {
+        AIAppContext(
+            projects: projects.sorted { $0.episodeDate > $1.episodeDate }.map {
+                AIProject(name: $0.name, date: Self.isoDay($0.episodeDate), script: $0.script)
+            },
+            trackedStories: trackedStories.map(aiStory)
+        )
+    }
+
+    func ask(_ question: String) async {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isAsking else { return }
+        let history = chat
+        chat.append(ChatMessage(role: "user", content: trimmed))
+        isAsking = true
+        defer { isAsking = false }
+        do {
+            let reply = try await service.ask(trimmed, history: history, app: aiAppContext)
+            chat.append(ChatMessage(role: "assistant", content: reply.answer, detail: "\(reply.model) · \(String(format: "%.1f", Double(reply.ms) / 1000))s"))
+        } catch {
+            chat.append(ChatMessage(role: "assistant", content: error.localizedDescription, detail: "error"))
+        }
+    }
+
+    func suggestStory(for excerpt: String, in projectID: Project.ID) async throws -> StorySuggestion? {
+        guard let project = project(projectID) else { return nil }
+        return try await service.suggestStory(excerpt: excerpt, episode: aiEpisode(project), stories: trackedStories.map(aiStory))
+    }
+
+    /// Stories to brief on: the ones tagged in this episode, else the most recently updated.
+    func briefingStories(for projectID: Project.ID) -> [TrackedStory] {
+        let tagged = trackedStories(in: projectID)
+        if !tagged.isEmpty { return tagged }
+        return Array(trackedStories.sorted { $0.lastUpdated > $1.lastUpdated }.prefix(8))
+    }
+
+    func briefing(for projectID: Project.ID) async throws -> [StoryBriefing] {
+        guard let project = project(projectID) else { return [] }
+        return try await service.briefing(episode: aiEpisode(project), stories: briefingStories(for: projectID).map(aiStory))
+    }
+
+    func introBullets(for projectID: Project.ID) async throws -> [String] {
+        guard let project = project(projectID) else { return [] }
+        return try await service.introBullets(episode: aiEpisode(project, includeScript: true))
+    }
+
+    func aiStatus() async throws -> AIStatus {
+        try await service.aiStatus()
+    }
+
+    func testAI() async throws -> AIReply {
+        try await service.testAI()
+    }
+
+    func teams(inLeague league: String) async throws -> [TeamOption] {
+        try await service.fetchTeams(league: league)
     }
 
     /// Loads the standings and matches. `force` (the Sync button) bypasses the service's cache.
@@ -196,7 +350,8 @@ final class AppStore {
         let state = PersistedState(
             projects: projects,
             storyQueue: storyQueue,
-            trackedStories: trackedStories
+            trackedStories: trackedStories,
+            config: config
         )
         do {
             let encoder = JSONEncoder()
@@ -244,7 +399,7 @@ final class AppStore {
     @discardableResult
     func createProject(name: String, date: Date, notes: [StoryItem] = []) -> Project {
         var project = Project(name: name, episodeDate: date, notes: notes)
-        let script = ScriptTemplate.make(for: date)
+        let script = ScriptTemplate.make(for: date, config: config)
         project.script = script.string
         project.richText = ScriptStyle.rtfData(script)
         projects.append(project)
@@ -304,7 +459,7 @@ final class AppStore {
         let selected = selectedStories
         guard !selected.isEmpty else { return }
         let project = createProject(
-            name: "\(ShowConfig.teamName) \(ShowConfig.showName)",
+            name: config.show.fullName,
             date: Date(),
             notes: selected
         )
@@ -335,6 +490,29 @@ final class AppStore {
         } catch {
             lastError = "The stories were added, but some couldn't be marked as used, so they may reappear. \(error.localizedDescription)"
         }
+    }
+
+    /// Takes stories out of a project and puts them back in the service's inbox, so queue items
+    /// return to the Story Queue and news returns to its news column.
+    func returnToQueue(_ ids: Set<UUID>, from projectID: Project.ID) async {
+        guard var project = project(projectID) else { return }
+        let returning = project.notes.filter { ids.contains($0.id) }
+        guard !returning.isEmpty else { return }
+        project.notes.removeAll { ids.contains($0.id) }
+        updateProject(project)
+
+        var failed = 0
+        for story in returning {
+            do {
+                try await service.setStatus(story.id, .inbox)
+            } catch {
+                failed += 1
+            }
+        }
+        if failed > 0 {
+            lastError = "\(failed) of \(returning.count) stories couldn't be returned to the queue in the notes service; they've been removed from the project."
+        }
+        await refresh()
     }
 
     /// Hides the selected stories. They're dismissed rather than deleted, so they stay in the
@@ -402,6 +580,43 @@ final class AppStore {
         updated.lastUpdated = Date()
         trackedStories[i] = updated
         save()
+    }
+
+    /// Tags a script passage as part of a tracked story (an existing one, or a new one by title).
+    /// Returns the story it was added to.
+    @discardableResult
+    func tagPassage(_ excerpt: String, in projectID: Project.ID, story storyID: TrackedStory.ID?, newTitle: String?, note: String?) -> TrackedStory? {
+        guard let project = project(projectID) else { return nil }
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mention = StoryMention(
+            projectID: project.id,
+            projectName: project.name,
+            episodeDate: project.episodeDate,
+            excerpt: excerpt.trimmingCharacters(in: .whitespacesAndNewlines),
+            note: trimmedNote?.isEmpty == false ? trimmedNote : nil
+        )
+
+        let index: Int
+        if let storyID, let existing = trackedStories.firstIndex(where: { $0.id == storyID }) {
+            index = existing
+        } else {
+            let title = (newTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            trackedStories.append(TrackedStory(title: title))
+            index = trackedStories.count - 1
+        }
+        trackedStories[index].mentions.append(mention)
+        trackedStories[index].latestUpdate = mention.note ?? mention.excerpt
+        trackedStories[index].lastUpdated = Date()
+        save()
+        return trackedStories[index]
+    }
+
+    /// Tracked stories mentioned in a project, most recently updated first.
+    func trackedStories(in projectID: Project.ID) -> [TrackedStory] {
+        trackedStories
+            .filter { $0.mentions.contains { $0.projectID == projectID } }
+            .sorted { $0.lastUpdated > $1.lastUpdated }
     }
 
     func deleteTrackedStory(_ id: TrackedStory.ID) {

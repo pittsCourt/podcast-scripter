@@ -25,10 +25,29 @@ See `services/notes/README.md` for the service, and `docs/iphone-shortcut.md` to
 
 Projects, tracked stories and a cached copy of the queue are stored at `~/Library/Application Support/PodcastScripter/data.json`. Set `PODCAST_SCRIPTER_DATA=/some/file.json` to use a different file (useful for testing).
 
+## Gemma
+
+Gemma 4 runs through the notes service, either on the Gemini API (the default: put your Google AI Studio key in `.env` as `GEMINI_API_KEY`) or a local Ollama model. Choose in Settings → AI, where **Test Gemma** checks it.
+
+- **Ask** tab in the right sidebar: questions about anything in the app (scripts, Story Tracker, queue, news, table, matches, rankings).
+- **Track Story** in the editor: Gemma suggests which story the passage belongs to, drafts a one-line update, and flags contradictions with what you said before.
+- **Briefing** in the editor sidebar: what you've said about each tracked story, plus anything new in the queue and news.
+- **Draft Bullets** in the editor: the intro's three top-story bullets, filled into the template.
+
+## Adapting it to another team or show
+
+Everything specific to the RSL Riot Report is a setting, not code:
+
+- **In the app:** open Settings (⌘,). It has tabs for the show (name, host, X handle), the script template (sections, intro and outro, with `{date}`, `{host}`, `{show}`, `{handle}`, `{team}`), the team and league (picked from ESPN), the competitions to track, the news searches, and the power-ranking sources and weekly sync time. Settings are saved in the notes service, so every device shares them.
+- **For a fresh install:** edit `services/notes/config.default.json`. Those are the defaults until someone changes them in Settings, and "Reset to Defaults" goes back to them.
+
+What carries over: standings, matches and competitions work for any ESPN soccer league and team, and news, the template and show details are free-form. The five power-ranking sources each have a reader built for one publication (MLSsoccer.com, ESPN's MLS column, TacticsFreeZone, Concacaf, Opta). Other leagues can turn them off; adding a different publication means writing a new reader in `services/notes/src/rankings.js`. The table layout assumes soccer stats (W/D/L, goal difference).
+
 ## Layout
 
 - `Sources/PodcastScripter/Models`: `Project`, `StoryItem`, `TrackedStory`, rankings and news
-- `Sources/PodcastScripter/Services/NotesService.swift`: the `NotesService` protocol and its HTTP client, plus mock power rankings, which have no backend yet
+- `Sources/PodcastScripter/Services/NotesService.swift`: the `NotesService` protocol and its HTTP client
+- `Sources/PodcastScripter/Models/AppConfig.swift`: show, template, team and source settings (mirrors `services/notes/config.default.json`)
 - `services/notes/`: the notes service (Node + SQLite, in Docker)
 - `docs/`: setup guides
 - `Sources/PodcastScripter/Store/AppStore.swift`: app state, JSON persistence, navigation

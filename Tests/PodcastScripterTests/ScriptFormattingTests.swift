@@ -198,6 +198,22 @@ private final class FakeNotesService: NotesService, @unchecked Sendable {
     func fetchRankings(season: Int?) async throws -> RankingsSummary { throw CancellationError() }
     func syncRankings() async throws -> RankingsSummary { throw CancellationError() }
     func checkHealth() async throws {}
+    func fetchConfig() async throws -> AppConfig { .fallback }
+    func saveConfig(_ config: AppConfig) async throws -> AppConfig { config }
+    func resetConfig() async throws -> AppConfig { .fallback }
+    func fetchTeams(league: String) async throws -> [TeamOption] { [] }
+    func aiStatus() async throws -> AIStatus { AIStatus(provider: "gemini", model: "test", ready: true, problem: nil) }
+    func testAI() async throws -> AIReply { AIReply(text: "ok", provider: "gemini", model: "test", ms: 1) }
+    var lastAskContext: AIAppContext?
+    func ask(_ question: String, history: [ChatMessage], app: AIAppContext) async throws -> AskReply {
+        lastAskContext = app
+        return AskReply(answer: "You said he was day to day.", model: "test", ms: 1200)
+    }
+    func suggestStory(excerpt: String, episode: AIEpisode, stories: [AIStory]) async throws -> StorySuggestion {
+        StorySuggestion(storyId: stories.first?.id, newTitle: nil, update: "Back in training", contradiction: nil)
+    }
+    func briefing(episode: AIEpisode, stories: [AIStory]) async throws -> [StoryBriefing] { [] }
+    func introBullets(episode: AIEpisode) async throws -> [String] { ["One", "Two", "Three"] }
 }
 
 @MainActor
@@ -224,6 +240,27 @@ struct AddToProjectTests {
         #expect(service.statuses == [post.id: .used, headline.id: .used])
         #expect(store.storyQueue.isEmpty && store.news.isEmpty && store.selectedStoryIDs.isEmpty)
         #expect(store.route == .editor(project.id))
+    }
+}
+
+@MainActor
+struct ReturnToQueueTests {
+    @Test func removesFromProjectAndRestoresInbox() async throws {
+        let service = FakeNotesService()
+        let post = StoryItem(kind: .xPost, title: "RSL (@realsaltlake)", body: "Lineup")
+        let note = StoryItem(kind: .storyNote, title: "Ask about the back line", body: "")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: service, fileURL: file)
+        let project = store.createProject(name: "Episode", date: Date(), notes: [post, note])
+
+        service.inbox = [post] // what the service lists once the post is back in the inbox
+        await store.returnToQueue([post.id], from: project.id)
+
+        let updated = try #require(store.project(project.id))
+        #expect(updated.notes.map(\.id) == [note.id])
+        #expect(service.statuses == [post.id: .inbox])
+        #expect(store.storyQueue.map(\.id) == [post.id])
     }
 }
 
@@ -278,6 +315,12 @@ struct MatchesDecodingTests {
         #expect(matches.upcoming.allSatisfy { $0.kickoff != nil })
         let dates = matches.results.compactMap(\.kickoff)
         #expect(dates == dates.sorted(by: >)) // newest result first
+        // Non-MLS competitions (2026: Leagues Cup), with stages and the Tigres shootout.
+        #expect(matches.competitions?.contains("Leagues Cup") == true)
+        let cup = matches.results.filter { $0.competition == "Leagues Cup" }
+        #expect(cup.count == 4)
+        #expect(cup.allSatisfy { $0.stage != nil })
+        #expect(cup.contains { $0.result == "D" && $0.shootout == "L" })
     }
 }
 
@@ -305,5 +348,104 @@ struct RankingsDecodingTests {
 
     @Test func ordinals() {
         #expect([1, 2, 3, 11, 22, 483].map(\.ordinal) == ["1st", "2nd", "3rd", "11th", "22nd", "483rd"])
+    }
+}
+
+struct AppConfigTests {
+    /// The app's built-in fallback must match the service's default settings file.
+    @Test func fallbackMatchesServiceDefaults() throws {
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("services/notes/config.default.json")
+        let defaults = try JSONDecoder().decode(AppConfig.self, from: Data(contentsOf: file))
+        // Section and competition IDs are generated locally, so compare their content.
+        #expect(defaults.template.sections.map { [$0.title, $0.body] } == AppConfig.fallback.template.sections.map { [$0.title, $0.body] })
+        #expect(defaults.competitions.map { [$0.name, $0.espnLeague] } == AppConfig.fallback.competitions.map { [$0.name, $0.espnLeague] })
+        #expect(defaults.show == AppConfig.fallback.show)
+        #expect(defaults.team == AppConfig.fallback.team)
+        #expect(defaults.news == AppConfig.fallback.news)
+        #expect(defaults.rankings == AppConfig.fallback.rankings)
+        #expect(defaults.aiSettings == AppConfig.fallback.aiSettings)
+    }
+
+    @MainActor
+    @Test func templateUsesSettings() throws {
+        var config = AppConfig.fallback
+        config.show = .init(name: "Sound Off", fullName: "Sounders Sound Off", host: "Alex", xHandle: "@soundoff")
+        config.team.shortName = "SEA"
+        config.template.sections = [
+            .init(title: "Open", body: "Welcome to {show} with {host} on {date}.\n• [Top story]"),
+            .init(title: "{team} Notes", body: ""),
+        ]
+        let date = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 16)))
+        let script = ScriptTemplate.make(for: date, config: config)
+        #expect(script.string == "Open\nWelcome to Sounders Sound Off with Alex on Friday, October 16, 2026.\n• [Top story]\nSEA Notes\n\n")
+        let bullet = (script.string as NSString).range(of: "• [Top story]")
+        #expect(ScriptStyle.indentLevel(from: script.attributes(at: bullet.location, effectiveRange: nil), block: .body) == 1)
+    }
+}
+
+@MainActor
+struct StoryTaggingTests {
+    @Test func tagsToNewAndExistingStories() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let project = store.createProject(name: "Episode 30", date: Date())
+        let before = store.trackedStories.count
+
+        let created = try #require(store.tagPassage("Glad jogged at training", in: project.id, story: nil, newTitle: "Glad Return", note: nil))
+        #expect(store.trackedStories.count == before + 1)
+        #expect(created.latestUpdate == "Glad jogged at training")
+
+        store.tagPassage("Full training Thursday", in: project.id, story: created.id, newTitle: nil, note: "Likely back vs SKC")
+        let story = try #require(store.trackedStories.first { $0.id == created.id })
+        #expect(story.mentions.map(\.excerpt) == ["Glad jogged at training", "Full training Thursday"])
+        #expect(story.latestUpdate == "Likely back vs SKC")
+        #expect(store.trackedStories(in: project.id).first?.id == created.id)
+    }
+
+    /// Stories saved before mentions existed must still load.
+    @Test func decodesStoriesWithoutMentions() throws {
+        let json = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","title":"Zach Booth Injury","latestUpdate":"","lastUpdated":"2026-10-01T00:00:00Z"}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let story = try decoder.decode(TrackedStory.self, from: Data(json.utf8))
+        #expect(story.title == "Zach Booth Injury" && story.mentions.isEmpty)
+    }
+}
+
+@MainActor
+struct GemmaFeatureTests {
+    @Test func askSendsScriptsAndTrackerAndKeepsHistory() async throws {
+        let service = FakeNotesService()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: service, fileURL: file)
+        var project = store.createProject(name: "Episode 28", date: Date())
+        project.script = "Diego Luna is day to day."
+        store.updateProject(project)
+        store.tagPassage("Diego Luna is day to day.", in: project.id, story: nil, newTitle: "Luna Knock", note: nil)
+
+        await store.ask("What did we say about Luna?")
+        await store.ask("And since then?")
+
+        #expect(store.chat.map(\.role) == ["user", "assistant", "user", "assistant"])
+        #expect(store.chat[1].detail == "test · 1.2s")
+        let sent = try #require(service.lastAskContext)
+        #expect(sent.projects.contains { $0.script.contains("Diego Luna") })
+        #expect(sent.trackedStories.contains { $0.title == "Luna Knock" && $0.mentions.count == 1 })
+    }
+
+    @Test func bulletsFillTemplatePlaceholders() {
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        textView.isRichText = true
+        textView.allowsUndo = true
+        textView.textStorage?.setAttributedString(ScriptTemplate.make(for: Date(), config: .fallback))
+        let controller = RichTextController()
+        controller.textView = textView
+        controller.fillBullets(["RSL draw San Jose 1-1", "Luna back for SKC", "Booth return nears"])
+        #expect(textView.string.contains("• RSL draw San Jose 1-1\n• Luna back for SKC\n• Booth return nears\nLet’s kick it off."))
+        #expect(!textView.string.contains("[Bullet"))
     }
 }

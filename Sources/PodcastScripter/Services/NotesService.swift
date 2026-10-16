@@ -1,14 +1,5 @@
 import Foundation
 
-/// Show-level settings. Will move to user settings later.
-enum ShowConfig {
-    static let showName = "Riot Report"
-    static let teamName = "RSL"
-    static let fullShowName = "RSL Riot Report"
-    static let host = "Court"
-    static let xHandle = "@rslriotreport"
-}
-
 /// Where the notes service lives. Edited in Settings (⌘,).
 enum ServiceSettings {
     static let urlKey = "notesServiceURL"
@@ -49,6 +40,106 @@ protocol NotesService: Sendable {
     /// Fetches every ranking source now (slower: it reads articles, Gmail and Opta's data).
     func syncRankings() async throws -> RankingsSummary
     func checkHealth() async throws
+    /// Settings shared by every device (show, template, team, sources).
+    func fetchConfig() async throws -> AppConfig
+    func saveConfig(_ config: AppConfig) async throws -> AppConfig
+    func resetConfig() async throws -> AppConfig
+    /// Teams in an ESPN league, for the team picker.
+    func fetchTeams(league: String) async throws -> [TeamOption]
+    func aiStatus() async throws -> AIStatus
+    /// Sends a one-line prompt to the configured model.
+    func testAI() async throws -> AIReply
+    // Gemma features: the app sends its own data (scripts, tracker); the service adds the rest.
+    func ask(_ question: String, history: [ChatMessage], app: AIAppContext) async throws -> AskReply
+    func suggestStory(excerpt: String, episode: AIEpisode, stories: [AIStory]) async throws -> StorySuggestion
+    func briefing(episode: AIEpisode, stories: [AIStory]) async throws -> [StoryBriefing]
+    func introBullets(episode: AIEpisode) async throws -> [String]
+}
+
+// MARK: - Gemma payloads
+
+struct ChatMessage: Codable, Equatable, Sendable, Identifiable {
+    var id = UUID()
+    /// "user" or "assistant".
+    var role: String
+    var content: String
+    /// For assistant replies: model and seconds, e.g. "gemma-4-26b-a4b-it · 3.2s".
+    var detail: String?
+
+    private enum CodingKeys: String, CodingKey { case role, content }
+}
+
+/// What only the app has: every episode's script and the Story Tracker.
+struct AIAppContext: Encodable, Sendable {
+    var projects: [AIProject]
+    var trackedStories: [AIStory]
+}
+
+struct AIProject: Encodable, Sendable {
+    var name: String
+    var date: String
+    var script: String
+}
+
+struct AIEpisode: Encodable, Sendable {
+    var name: String
+    var date: String
+    var script: String?
+    var stories: [AIEpisodeStory]?
+}
+
+struct AIEpisodeStory: Encodable, Sendable {
+    var kind: String
+    var title: String
+    var body: String
+}
+
+struct AIStory: Encodable, Sendable {
+    var id: String
+    var title: String
+    var latestUpdate: String
+    var mentions: [AIMention]
+}
+
+struct AIMention: Encodable, Sendable {
+    var episode: String
+    var date: String
+    var excerpt: String
+    var note: String?
+}
+
+struct AskReply: Decodable, Sendable {
+    var answer: String
+    var model: String
+    var ms: Int
+}
+
+struct StorySuggestion: Decodable, Equatable, Sendable {
+    var storyId: String?
+    var newTitle: String?
+    var update: String
+    var contradiction: String?
+}
+
+struct StoryBriefing: Decodable, Equatable, Sendable, Identifiable {
+    var storyId: String
+    var summary: String
+    var whatsNew: String?
+    var id: String { storyId }
+}
+
+struct AIStatus: Decodable, Equatable, Sendable {
+    var provider: String
+    var model: String
+    var ready: Bool
+    var problem: String?
+}
+
+struct AIReply: Decodable, Equatable, Sendable {
+    var text: String
+    var provider: String
+    var model: String
+    var ms: Int
 }
 
 // MARK: - HTTP client
@@ -114,6 +205,55 @@ struct NotesServiceClient: NotesService {
         try await send("api/rankings/sync", method: "POST", timeout: 180)
     }
 
+    func fetchConfig() async throws -> AppConfig {
+        try await send("api/config")
+    }
+
+    func saveConfig(_ config: AppConfig) async throws -> AppConfig {
+        try await send("api/config", method: "PUT", json: config)
+    }
+
+    func resetConfig() async throws -> AppConfig {
+        try await send("api/config/reset", method: "POST")
+    }
+
+    func fetchTeams(league: String) async throws -> [TeamOption] {
+        try await send("api/espn/teams", query: [URLQueryItem(name: "league", value: league)])
+    }
+
+    func aiStatus() async throws -> AIStatus {
+        try await send("api/ai/status")
+    }
+
+    func testAI() async throws -> AIReply {
+        try await send("api/ai/test", method: "POST", timeout: 200)
+    }
+
+    private struct AskBody: Encodable { var question: String; var history: [ChatMessage]; var app: AIAppContext }
+    private struct SuggestBody: Encodable { var excerpt: String; var episode: AIEpisode; var stories: [AIStory] }
+    private struct BriefingBody: Encodable { var episode: AIEpisode; var stories: [AIStory] }
+    private struct BriefingReply: Decodable { var briefings: [StoryBriefing] }
+    private struct BulletsBody: Encodable { var episode: AIEpisode }
+    private struct BulletsReply: Decodable { var bullets: [String] }
+
+    func ask(_ question: String, history: [ChatMessage], app: AIAppContext) async throws -> AskReply {
+        try await send("api/ai/ask", method: "POST", json: AskBody(question: question, history: history, app: app), timeout: 200)
+    }
+
+    func suggestStory(excerpt: String, episode: AIEpisode, stories: [AIStory]) async throws -> StorySuggestion {
+        try await send("api/ai/suggest-story", method: "POST", json: SuggestBody(excerpt: excerpt, episode: episode, stories: stories), timeout: 200)
+    }
+
+    func briefing(episode: AIEpisode, stories: [AIStory]) async throws -> [StoryBriefing] {
+        let reply: BriefingReply = try await send("api/ai/briefing", method: "POST", json: BriefingBody(episode: episode, stories: stories), timeout: 200)
+        return reply.briefings
+    }
+
+    func introBullets(episode: AIEpisode) async throws -> [String] {
+        let reply: BulletsReply = try await send("api/ai/intro-bullets", method: "POST", json: BulletsBody(episode: episode), timeout: 200)
+        return reply.bullets
+    }
+
     func checkHealth() async throws {
         // Hits an authed endpoint so a bad token shows up here too.
         let _: [ServiceItem] = try await send("api/items", query: [URLQueryItem(name: "status", value: "used")])
@@ -122,7 +262,8 @@ struct NotesServiceClient: NotesService {
     // MARK: Plumbing
 
     private func send<T: Decodable>(_ path: String, method: String = "GET", query: [URLQueryItem] = [], body: [String: String]? = nil, timeout: TimeInterval = 20) async throws -> T {
-        let data = try await perform(path, method: method, query: query, body: body, timeout: timeout)
+        let encoded = try body.map { try JSONEncoder().encode($0) }
+        let data = try await perform(path, method: method, query: query, body: encoded, timeout: timeout)
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
@@ -134,7 +275,16 @@ struct NotesServiceClient: NotesService {
         _ = try await perform(path, method: method, query: [], body: nil, timeout: 20)
     }
 
-    private func perform(_ path: String, method: String, query: [URLQueryItem], body: [String: String]?, timeout: TimeInterval) async throws -> Data {
+    private func send<T: Decodable, Body: Encodable>(_ path: String, method: String, json: Body, timeout: TimeInterval = 20) async throws -> T {
+        let data = try await perform(path, method: method, query: [], body: JSONEncoder().encode(json), timeout: timeout)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw NotesServiceError.server("Unexpected response from the notes service.")
+        }
+    }
+
+    private func perform(_ path: String, method: String, query: [URLQueryItem], body: Data?, timeout: TimeInterval) async throws -> Data {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
 
@@ -146,7 +296,7 @@ struct NotesServiceClient: NotesService {
         }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(body)
+            request.httpBody = body
         }
 
         let data: Data

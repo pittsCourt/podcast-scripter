@@ -51,6 +51,20 @@ struct FormatBar: View {
                 controller.isEditingLink = true
             }
             FormatButton(systemName: "eraser", help: "Clear formatting", action: controller.clearFormatting)
+
+            divider
+
+            Button(action: controller.beginTagging) {
+                Label("Track Story", systemImage: "binoculars")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(controller.hasSelection ? Theme.textPrimary : Theme.textTertiary)
+                    .padding(.horizontal, 8)
+                    .frame(height: 26)
+                    .background(Color.white.opacity(controller.hasSelection ? 0.08 : 0.03), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!controller.hasSelection)
+            .help("Select part of the script, then add it to a tracked story (⇧⌘T)")
         }
     }
 

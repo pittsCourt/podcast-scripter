@@ -22,7 +22,7 @@ struct StandingsView: View {
                 header
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(rows(in: standings)) { StandingsRowView(row: $0) }
+                        ForEach(rows(in: standings)) { StandingsRowView(row: $0, club: store.config.team.shortName) }
                     }
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
@@ -80,7 +80,10 @@ private struct StandingsRowView: View {
 
     var row: StandingsRow
 
-    private var isClub: Bool { row.abbreviation == ShowConfig.teamName }
+    /// The followed team's abbreviation (Settings), highlighted in the table.
+    var club: String
+
+    private var isClub: Bool { row.abbreviation.caseInsensitiveCompare(club) == .orderedSame }
 
     var body: some View {
         HStack(spacing: 0) {

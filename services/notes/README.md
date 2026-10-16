@@ -43,7 +43,7 @@ The login is sent over plain HTTP. That's fine on your home network and over Wir
 | DELETE | `/api/feeds/:id` | |
 | POST | `/api/feeds/refresh` | Fetches all feeds now |
 | GET | `/api/standings?refresh=1` | MLS tables: `{ season, updatedAt, stale, conferences: [{ name, rows }], combined }`. The overall table is sorted by points, wins, goal difference, then goals for. |
-| GET | `/api/matches?refresh=1` | The club's matches: `{ team, results, upcoming, updatedAt, stale }`. Each match has `date, competition, venue, broadcast, isHome, opponent, goalsFor, goalsAgainst, result (W/D/L), status`. |
+| GET | `/api/matches?refresh=1` | The club's matches this season in every competition (MLS including playoffs, Leagues Cup, U.S. Open Cup, Concacaf Champions Cup): `{ season, team, competitions, results, upcoming, updatedAt, stale }`. Each match has `date, competition, stage, note, venue, broadcast, isHome, opponent, goalsFor, goalsAgainst, result (W/D/L), shootout (W/L on penalties), status`. |
 
 Standings and matches come from ESPN's public JSON, which needs no key. They're cached for `STANDINGS_TTL_MINUTES` (default 30). `refresh=1` fetches fresh data, and the last good copy is served (with `stale: true`) if ESPN is down. The club is `TEAM_ESPN_ID` (default 4771, Real Salt Lake).
 
@@ -55,6 +55,24 @@ Example:
 curl -H "Authorization: Bearer $NOTES_TOKEN" -H "Content-Type: application/json" \
   -d '{"input":"https://x.com/realsaltlake/status/2098189245450264775"}' http://localhost:3030/api/items
 ```
+
+## Settings
+
+`GET /api/config` returns the show, script template, team (ESPN league and team ID), competitions, news searches and ranking-source settings. `PUT /api/config` saves a full copy (validated), `POST /api/config/reset` restores the defaults, and `GET /api/config/defaults` shows them. Defaults come from `config.default.json`; saved changes live in the database. `GET /api/espn/teams?league=usa.1` lists a league's teams for the Settings picker. Changing the team clears cached standings and matches, the news searches update the Google News feeds, and the weekly schedule restarts. Passwords and tokens stay in `.env`.
+
+## Gemma
+
+The service calls Gemma through the Gemini API (Google AI Studio; the default, needs `GEMINI_API_KEY` in `.env`) or a local Ollama model, set in Settings → AI (`config.ai`). Default models: `gemma-4-26b-a4b-it` on the Gemini API, `gemma4:12b` on Ollama.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/ai/status`, `POST /api/ai/test` | Which provider and model are active, whether the key is set, and a quick round trip |
+| `POST /api/ai/ask` | `{ question, history, app }`: answers questions about the show. The app sends scripts and the Story Tracker; the service adds the queue, news, tables, matches and rankings. |
+| `POST /api/ai/suggest-story` | `{ excerpt, episode, stories }`: which tracked story a passage belongs to, a one-line update, and any contradiction with earlier mentions |
+| `POST /api/ai/briefing` | `{ episode, stories }`: per story, what's been said so far and what's new in the queue and news |
+| `POST /api/ai/intro-bullets` | `{ episode }`: the three top-story bullets for the intro |
+
+Requests are kept under `ai.contextChars` characters (default 60,000, about 15K tokens). Scripts are cut down to the passages that match the question, so the requests stay inside the Gemini API's free-tier limits.
 
 ## Power rankings
 

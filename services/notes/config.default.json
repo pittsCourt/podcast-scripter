@@ -1,0 +1,110 @@
+{
+  "show": {
+    "name": "Riot Report",
+    "fullName": "RSL Riot Report",
+    "host": "Court",
+    "xHandle": "@rslriotreport"
+  },
+  "template": {
+    "sections": [
+      {
+        "title": "Intro",
+        "body": "Hello, I’m {host}, and this is your {show}. Today is {date} and our top stories include:\n• [Bullet 1]\n• [Bullet 2]\n• [Bullet 3]\nLet’s kick it off."
+      },
+      {
+        "title": "Match Report",
+        "body": ""
+      },
+      {
+        "title": "{team} News",
+        "body": ""
+      },
+      {
+        "title": "League News",
+        "body": ""
+      },
+      {
+        "title": "Power Rankings",
+        "body": ""
+      },
+      {
+        "title": "Looking Ahead",
+        "body": ""
+      },
+      {
+        "title": "Outro",
+        "body": "Thanks for tuning in! Follow us on X {handle}. Until next time, I’m your host {host}, and this has been your {show}."
+      }
+    ]
+  },
+  "team": {
+    "name": "Real Salt Lake",
+    "shortName": "RSL",
+    "aliases": [
+      "RSL"
+    ],
+    "espnSport": "soccer",
+    "espnLeague": "usa.1",
+    "espnTeamId": "4771"
+  },
+  "competitions": [
+    {
+      "name": "MLS",
+      "espnLeague": "usa.1",
+      "enabled": true
+    },
+    {
+      "name": "Leagues Cup",
+      "espnLeague": "concacaf.leagues.cup",
+      "enabled": true
+    },
+    {
+      "name": "U.S. Open Cup",
+      "espnLeague": "usa.open",
+      "enabled": true
+    },
+    {
+      "name": "Concacaf Champions Cup",
+      "espnLeague": "concacaf.champions",
+      "enabled": true
+    }
+  ],
+  "news": {
+    "teamQuery": "\"Real Salt Lake\"",
+    "leagueQuery": "\"Major League Soccer\" OR MLS soccer"
+  },
+  "rankings": {
+    "schedule": "Tue 16:00",
+    "timeZone": "UTC",
+    "sources": {
+      "mls": {
+        "enabled": true
+      },
+      "espn": {
+        "enabled": true,
+        "query": "MLS Power Rankings"
+      },
+      "tfz": {
+        "enabled": true,
+        "sender": "tacticsfreezone@ghost.io",
+        "forwardedFrom": []
+      },
+      "concacaf": {
+        "enabled": true
+      },
+      "opta": {
+        "enabled": true
+      }
+    }
+  },
+  "ai": {
+    "provider": "gemini",
+    "gemini": {
+      "model": "gemma-4-26b-a4b-it"
+    },
+    "ollama": {
+      "url": "http://host.docker.internal:11434",
+      "model": "gemma4:12b"
+    }
+  }
+}

@@ -5,6 +5,9 @@ struct HomeView: View {
     // Column proportions, saved between launches. Drag the borders to change them.
     @AppStorage("home.projectsFraction") private var projectsFraction = HomeView.defaultProjectsFraction
     @AppStorage("home.queueFraction") private var queueFraction = HomeView.defaultQueueFraction
+    // Heights of the stacked panels (top pane's share of the column).
+    @AppStorage("home.queueHeightFraction") private var queueHeightFraction = 0.5
+    @AppStorage("home.newsHeightFraction") private var newsHeightFraction = 0.5
     static let defaultProjectsFraction = 0.22
     static let defaultQueueFraction = 0.5
 
@@ -15,13 +18,15 @@ struct HomeView: View {
         } trailing: {
             VStack(spacing: 12) {
                 SplitPair(fraction: $queueFraction, defaultFraction: Self.defaultQueueFraction, minLeading: 300, minTrailing: 300) {
-                    VStack(spacing: 12) {
+                    SplitPair(axis: .vertical, fraction: $queueHeightFraction, defaultFraction: 0.5, minLeading: 150, minTrailing: 120) {
                         StoryQueuePanel()
+                    } trailing: {
                         StoryTrackerPanel()
                     }
                 } trailing: {
-                    VStack(spacing: 12) {
+                    SplitPair(axis: .vertical, fraction: $newsHeightFraction, defaultFraction: 0.5, minLeading: 140, minTrailing: 140) {
                         NewsPanel(category: .team)
+                    } trailing: {
                         NewsPanel(category: .league)
                     }
                 }
