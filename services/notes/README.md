@@ -17,7 +17,17 @@ docker compose up -d --build     # http://localhost:3030
 docker compose logs -f notes
 ```
 
-`NOTES_TOKEN` comes from the repo-root `.env` file, which is not committed. When it's set, every `/api` call except `/api/health` needs `Authorization: Bearer <token>`. The inbox web page asks for the token once and remembers it.
+Settings come from the repo-root `.env` file, which is not committed:
+
+| Variable | Used by |
+|---|---|
+| `NOTES_USER`, `NOTES_PASSWORD` | You, in a browser. The inbox page shows the browser's login prompt, and Safari can save it to Passwords. |
+| `NOTES_TOKEN` | The Mac app and the iPhone Shortcut, sent as `Authorization: Bearer <token>` |
+| `FEED_INTERVAL_MINUTES` | How often news feeds refresh (default 30; 0 turns it off) |
+
+Either the login or the token works on every route except `/api/health`, which is always open. With none of them set, the service is open; only do that for local testing. After changing `.env`, run `docker compose up -d` to apply it.
+
+The login is sent over plain HTTP. That's fine on your home network and over WireGuard, which encrypts the traffic, but don't expose port 3030 directly to the internet.
 
 ## API
 
@@ -32,6 +42,10 @@ docker compose logs -f notes
 | GET/POST | `/api/feeds` | POST takes `{ url, title, category }` |
 | DELETE | `/api/feeds/:id` | |
 | POST | `/api/feeds/refresh` | Fetches all feeds now |
+| GET | `/api/standings?refresh=1` | MLS tables: `{ season, updatedAt, stale, conferences: [{ name, rows }], combined }`. The overall table is sorted by points, wins, goal difference, then goals for. |
+| GET | `/api/matches?refresh=1` | The club's matches: `{ team, results, upcoming, updatedAt, stale }`. Each match has `date, competition, venue, broadcast, isHome, opponent, goalsFor, goalsAgainst, result (W/D/L), status`. |
+
+Standings and matches come from ESPN's public JSON, which needs no key. They're cached for `STANDINGS_TTL_MINUTES` (default 30). `refresh=1` fetches fresh data, and the last good copy is served (with `stale: true`) if ESPN is down. The club is `TEAM_ESPN_ID` (default 4771, Real Salt Lake).
 
 Items are camelCase JSON: `id, kind (x_post|article|note|news), status, title, body, url, source, authorName, handle, imageUrl, mediaLinks, category, postedOn, publishedAt, createdAt, updatedAt`.
 
@@ -41,6 +55,24 @@ Example:
 curl -H "Authorization: Bearer $NOTES_TOKEN" -H "Content-Type: application/json" \
   -d '{"input":"https://x.com/realsaltlake/status/2098189245450264775"}' http://localhost:3030/api/items
 ```
+
+## Power rankings
+
+`POST /api/rankings/sync` fetches RSL's rank from five sources and saves a dated snapshot of each in the `ranking_snapshots` table, tagged with its season (the calendar year). Snapshots are kept forever, and articles and emails already read are skipped. `GET /api/rankings?season=2026` returns one season (the current one by default): `season`, `seasons` (every season with data), and per source `latest`, `previousRank`, `history` and the last sync `error`. Nothing runs on a schedule. The Mac app syncs when it opens and when you click Sync.
+
+| Source | How | History |
+|---|---|---|
+| MLS | Power-rankings topic page, then each article's 30 ranking headers, in order | Backfilled from every article this season |
+| ESPN | ESPN search API, then each article's "21. Real Salt Lake … Previous ranking: 19" | Backfilled |
+| TacticsFreeZone | Gmail over IMAP: emails from `tacticsfreezone@ghost.io` with "Power Rankings" in the subject, plus ones forwarded from `TFZ_FORWARDED_FROM` (each dated by its original send date) | Backfilled from the emails in the account |
+| Concacaf | The Concacaf Club Ranking table, published by Hypercube | Recorded from the first sync on |
+| Opta | RSL's entry in the data behind Opta's interactive table | Recorded from the first sync on |
+
+Gmail needs `GMAIL_USER` and `GMAIL_APP_PASSWORD` in `.env`. Create the app password at Google Account → Security → 2-Step Verification → App passwords; if it contains `$`, wrap it in single quotes. Each source fails on its own without blocking the others. The Opta reader depends on how Opta's page is built and is the most likely to break.
+
+## Running it elsewhere (server, Raspberry Pi)
+
+The image is based on `node:24-alpine`, which is published for Intel/AMD (amd64) and ARM (arm64, armv7). Storage uses Node's built-in SQLite, so nothing has to be compiled. That means the same `docker compose up -d --build` works on this Mac, a Linux server, or a Raspberry Pi. On a Pi, use the 64-bit Raspberry Pi OS, and plan on a few minutes for the first build.
 
 ## Moving to the OptiPlex later
 

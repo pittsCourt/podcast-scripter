@@ -4,13 +4,15 @@ import SwiftUI
 struct EditorView: View {
     @Environment(AppStore.self) private var store
     var projectID: Project.ID
+    /// Shared by the editor and the sidebar, which inserts stories into the script.
+    @State private var controller = RichTextController()
 
     var body: some View {
         if let project = store.project(projectID) {
             HStack(spacing: 12) {
-                ScriptEditor(project: project)
-                EditorSidebar(project: project)
-                    .frame(width: 360)
+                ScriptEditor(project: project, controller: controller)
+                StorySidebar(project: project, controller: controller)
+                    .frame(width: 340)
             }
             .padding(12)
         } else {
@@ -22,9 +24,11 @@ struct EditorView: View {
 private struct ScriptEditor: View {
     @Environment(AppStore.self) private var store
     var project: Project
+    var controller: RichTextController
     @State private var editingDetails = false
 
     var body: some View {
+        @Bindable var controller = controller
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -44,31 +48,24 @@ private struct ScriptEditor: View {
             .frame(height: 60)
             Divider().overlay(Theme.border)
 
-            TextEditor(text: Binding(
-                get: { project.script },
-                set: { newValue in
-                    var updated = project
-                    updated.script = newValue
-                    store.updateProject(updated, debounced: true)
-                }
-            ))
-            .font(.system(size: 16))
-            .lineSpacing(6)
-            .scrollContentBackground(.hidden)
-            .foregroundStyle(Theme.textPrimary)
+            FormatBar(controller: controller)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 42)
+            Divider().overlay(Theme.border)
+
+            RichTextEditor(
+                documentID: project.id,
+                initialText: { ScriptStyle.load(project) },
+                controller: controller
+            ) { text in
+                var updated = store.project(project.id) ?? project
+                updated.script = text.string
+                updated.richText = ScriptStyle.rtfData(text)
+                store.updateProject(updated, debounced: true)
+            }
             .frame(maxWidth: 760)
             .padding(.horizontal, 32)
-            .padding(.vertical, 24)
-            .overlay(alignment: .topLeading) {
-                if project.script.isEmpty {
-                    Text("Start writing your script…")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Theme.textTertiary)
-                        .padding(.horizontal, 37)
-                        .padding(.vertical, 24)
-                        .allowsHitTesting(false)
-                }
-            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider().overlay(Theme.border)
@@ -84,97 +81,139 @@ private struct ScriptEditor: View {
             .frame(height: 34)
         }
         .card()
+        .focusedSceneValue(\.richTextController, controller)
         .sheet(isPresented: $editingDetails) {
             ProjectDetailsSheet(title: "Edit Project", project: project) { store.updateProject($0) }
+        }
+        .sheet(isPresented: $controller.isEditingLink) {
+            LinkSheet(controller: controller)
         }
     }
 }
 
-private struct EditorSidebar: View {
-    @Environment(AppStore.self) private var store
+/// The stories picked for this project when it was created.
+private struct StorySidebar: View {
     var project: Project
+    var controller: RichTextController
+    @State private var reading: StoryItem?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if !project.notes.isEmpty {
-                    section("Project Notes") {
-                        ForEach(project.notes) { note in
-                            item(title: note.title, detail: note.body, meta: [note.kind.label, note.source].compactMap { $0 }.joined(separator: "  ·  "), url: note.url)
+        VStack(spacing: 0) {
+            SectionHeader(title: "Selected Stories", count: project.notes.count)
+            Divider().overlay(Theme.border)
+
+            if project.notes.isEmpty {
+                EmptyState(
+                    title: "No stories attached",
+                    systemImage: "tray",
+                    message: "Select stories on the home page and click New Project to bring them in."
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(project.notes) { story in
+                            StoryCard(story: story, controller: controller) { reading = story }
                         }
                     }
-                }
-                section("\(ShowConfig.teamName) News") {
-                    newsList(store.news(in: .team))
-                }
-                section("League News") {
-                    newsList(store.news(in: .league))
+                    .padding(8)
                 }
             }
-            .padding(.vertical, 16)
-            .padding(.horizontal, 8)
         }
         .card()
-    }
-
-    @ViewBuilder
-    private func newsList(_ items: [NewsItem]) -> some View {
-        if items.isEmpty {
-            Text(store.connection == .connecting ? "Loading…" : "No news yet. Check the notes service connection.")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.horizontal, 10)
-        } else {
-            ForEach(items) { newsItem($0) }
+        .sheet(item: $reading) { story in
+            ArticleReaderSheet(story: story, controller: controller)
         }
     }
+}
 
-    private func newsItem(_ news: NewsItem) -> some View {
-        item(
-            title: news.headline,
-            detail: news.summary,
-            meta: "\(news.source)  ·  \(news.publishedAt.formatted(.relative(presentation: .named)))",
-            url: news.url
-        )
-    }
+private struct StoryCard: View {
+    var story: StoryItem
+    var controller: RichTextController
+    var onRead: () -> Void
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            GroupLabel(text: title)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 4)
-            content()
-        }
-    }
-
-    private func item(title: String, detail: String, meta: String, url: URL?) -> some View {
-        HoverRow { hovering in
+    var body: some View {
+        HoverRow { _ in
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(story.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: 4)
-                    if url != nil {
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Theme.textTertiary)
-                            .opacity(hovering ? 1 : 0)
-                    }
+                    KindBadge(kind: story.kind)
                 }
-                if !detail.isEmpty {
-                    Text(detail)
+                if !story.body.isEmpty {
+                    Text(story.body)
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(3)
+                        .textSelection(.enabled)
                 }
-                Text(meta)
+                Text([story.source, story.createdAt.formatted(date: .abbreviated, time: .omitted)].compactMap { $0 }.joined(separator: "  ·  "))
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
+                HStack(spacing: 6) {
+                    primaryAction
+                    Spacer()
+                    if let url = story.url {
+                        CardAction(title: "Open", systemImage: "arrow.up.right", help: url.absoluteString) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+                .padding(.top, 2)
             }
             .padding(10)
         }
-        .onTapGesture { if let url { NSWorkspace.shared.open(url) } }
-        .help(url == nil ? "" : "Open in browser")
+    }
+}
+
+private extension StoryCard {
+    @ViewBuilder
+    var primaryAction: some View {
+        switch story.kind {
+        case .xPost:
+            CardAction(title: "Insert Quote", systemImage: "text.quote", help: "Insert the post and its link as a quote at the cursor", isProminent: true) {
+                controller.insertQuote(
+                    story.body.isEmpty ? [story.title] : story.body.components(separatedBy: .newlines).filter { !$0.isEmpty },
+                    attribution: "— \(story.title) on X",
+                    link: story.url
+                )
+            }
+        case .article, .news:
+            if story.url != nil {
+                CardAction(title: "Read & Quote", systemImage: "doc.text.magnifyingglass", help: "Open the article, select text, and insert it as a quote", isProminent: true, action: onRead)
+            }
+        case .storyNote:
+            CardAction(title: "Insert", systemImage: "text.insert", help: "Insert the note as text at the cursor", isProminent: true) {
+                controller.insertBody(story.body.isEmpty ? story.title : "\(story.title)\n\(story.body)")
+            }
+        }
+    }
+}
+
+/// Small text button used on story cards.
+private struct CardAction: View {
+    var title: String
+    var systemImage: String
+    var help: String
+    var isProminent = false
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isProminent ? Theme.accent : hovering ? Theme.textPrimary : Theme.textTertiary)
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isProminent ? Theme.accent.opacity(hovering ? 0.22 : 0.12) : hovering ? Color.white.opacity(0.08) : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering = $0 }
     }
 }

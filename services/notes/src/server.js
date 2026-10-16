@@ -10,6 +10,10 @@
 //   GET    /api/news?category=team|league&limit=20
 //   GET    /api/feeds | POST /api/feeds { url, title, category } | DELETE /api/feeds/:id
 //   POST   /api/feeds/refresh
+//   GET    /api/standings?refresh=1          -> MLS conference tables + overall (ESPN, cached 30 min)
+//   GET    /api/matches?refresh=1            -> the club's recent results and upcoming matches (ESPN)
+//   GET    /api/rankings?season=2026         -> power rankings per source for a season (default: current)
+//   POST   /api/rankings/sync                -> fetch all sources now (app open / Sync button)
 
 const express = require('express');
 const fs = require('fs');
@@ -17,29 +21,29 @@ const path = require('path');
 const db = require('./db');
 const feeds = require('./feeds');
 const { buildItem, HttpError } = require('./ingest');
+const { createAuth } = require('./auth');
+const { getStandings, getMatches } = require('./espn');
+const rankings = require('./rankings');
 const { version } = require('../package.json');
 
 const PORT = process.env.PORT || 3000;
-const TOKEN = (process.env.NOTES_TOKEN || '').trim();
 const FEED_INTERVAL_MINUTES = Number(process.env.FEED_INTERVAL_MINUTES || 30);
 
+const auth = createAuth({
+  token: (process.env.NOTES_TOKEN || '').trim(),
+  user: (process.env.NOTES_USER || '').trim(),
+  password: process.env.NOTES_PASSWORD || '',
+});
+
 const app = express();
+app.use(auth.middleware);
 app.use(express.json({ limit: '256kb' }));
 // iOS Shortcuts sometimes sends form bodies; accept both.
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version, authRequired: !!TOKEN });
-});
-
-// Everything else under /api needs the token when one is configured.
-app.use('/api', (req, res, next) => {
-  if (!TOKEN) return next();
-  const header = req.get('authorization') || '';
-  const supplied = header.replace(/^Bearer\s+/i, '') || req.get('x-notes-token') || req.query.token;
-  if (supplied === TOKEN) return next();
-  res.status(401).json({ error: 'Missing or wrong token.' });
+  res.json({ ok: true, version, authRequired: auth.enabled });
 });
 
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((err) => {
@@ -106,6 +110,26 @@ app.delete('/api/feeds/:id', wrap((req, res) => {
 
 app.post('/api/feeds/refresh', wrap(async (req, res) => res.json(await feeds.refreshAll())));
 
+// `refresh=1` skips the cache (the Mac app's Sync button).
+const espnRoute = (load, what) => wrap(async (req, res) => {
+  try {
+    res.json(await load({ refresh: req.query.refresh === '1' }));
+  } catch (err) {
+    throw new HttpError(502, `Couldn't load ${what}: ${err.message}`);
+  }
+});
+
+app.get('/api/standings', espnRoute(getStandings, 'standings'));
+app.get('/api/matches', espnRoute(getMatches, 'matches'));
+
+app.get('/api/rankings', wrap((req, res) => {
+  const season = req.query.season ? Number(req.query.season) : undefined;
+  if (season !== undefined && !Number.isInteger(season)) throw new HttpError(400, 'season must be a year, e.g. 2026.');
+  res.json(rankings.summary(season));
+}));
+// Each source fails independently; its error comes back in the summary.
+app.post('/api/rankings/sync', wrap(async (req, res) => res.json(await rankings.syncAll())));
+
 /** One-time import of the old x-post-archiver history (data/posts.json). */
 function importLegacyPosts() {
   const file = path.join(db.DATA_DIR, 'posts.json');
@@ -146,5 +170,6 @@ feeds.seedDefaultFeeds();
 feeds.startScheduler(FEED_INTERVAL_MINUTES);
 
 app.listen(PORT, () => {
-  console.log(`notes service v${version} listening on port ${PORT}${TOKEN ? '' : ' (no NOTES_TOKEN set: API is open)'}`);
+  const modes = [auth.loginEnabled && 'login', auth.tokenEnabled && 'token'].filter(Boolean);
+  console.log(`notes service v${version} listening on port ${PORT} (auth: ${modes.join(' + ') || 'none, API is open'})`);
 });

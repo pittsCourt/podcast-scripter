@@ -4,6 +4,9 @@ import Foundation
 enum ShowConfig {
     static let showName = "Riot Report"
     static let teamName = "RSL"
+    static let fullShowName = "RSL Riot Report"
+    static let host = "Court"
+    static let xHandle = "@rslriotreport"
 }
 
 /// Where the notes service lives. Edited in Settings (⌘,).
@@ -22,32 +25,30 @@ enum ServiceSettings {
     }
 }
 
+enum ItemStatus: String, Sendable {
+    case inbox
+    case used
+    case dismissed
+}
+
 /// The boundary to the notes service in services/notes (the story inbox and RSS news).
 protocol NotesService: Sendable {
     func fetchInbox() async throws -> [StoryItem]
+    /// Only news that hasn't been used or dismissed.
     func fetchNews(category: NewsCategory, limit: Int) async throws -> [NewsItem]
     /// A link (X post or article) or note text; the service decides which.
     func add(input: String) async throws -> StoryItem
-    func markUsed(_ id: StoryItem.ID) async throws
+    /// Works for inbox items and news.
+    func setStatus(_ id: UUID, _ status: ItemStatus) async throws
     func delete(_ id: StoryItem.ID) async throws
+    /// `refresh` skips the service's 30-minute cache.
+    func fetchStandings(refresh: Bool) async throws -> Standings
+    func fetchMatches(refresh: Bool) async throws -> Matches
+    /// Saved rankings for a season (nil = current), instantly.
+    func fetchRankings(season: Int?) async throws -> RankingsSummary
+    /// Fetches every ranking source now (slower: it reads articles, Gmail and Opta's data).
+    func syncRankings() async throws -> RankingsSummary
     func checkHealth() async throws
-}
-
-/// Power rankings have no backend yet.
-enum MockRankings {
-    static let groups = [
-        RankingGroup(title: "League", entries: [
-            RankingEntry(source: "MLS", rank: 7, change: 2),
-            RankingEntry(source: "ESPN", rank: 10, change: -2),
-            RankingEntry(source: "TacticsFreeZone", rank: 28, change: -5),
-        ]),
-        RankingGroup(title: "Region", entries: [
-            RankingEntry(source: "Concacaf", rank: 43, change: -7),
-        ]),
-        RankingGroup(title: "World", entries: [
-            RankingEntry(source: "Opta", rank: 449, change: -2),
-        ]),
-    ]
 }
 
 // MARK: - HTTP client
@@ -89,12 +90,28 @@ struct NotesServiceClient: NotesService {
         return story
     }
 
-    func markUsed(_ id: StoryItem.ID) async throws {
-        let _: ServiceItem = try await send("api/items/\(id.uuidString.lowercased())", method: "PATCH", body: ["status": "used"])
+    func setStatus(_ id: UUID, _ status: ItemStatus) async throws {
+        let _: ServiceItem = try await send("api/items/\(id.uuidString.lowercased())", method: "PATCH", body: ["status": status.rawValue])
     }
 
     func delete(_ id: StoryItem.ID) async throws {
         try await sendEmpty("api/items/\(id.uuidString.lowercased())", method: "DELETE")
+    }
+
+    func fetchStandings(refresh: Bool) async throws -> Standings {
+        try await send("api/standings", query: refresh ? [URLQueryItem(name: "refresh", value: "1")] : [])
+    }
+
+    func fetchMatches(refresh: Bool) async throws -> Matches {
+        try await send("api/matches", query: refresh ? [URLQueryItem(name: "refresh", value: "1")] : [])
+    }
+
+    func fetchRankings(season: Int?) async throws -> RankingsSummary {
+        try await send("api/rankings", query: season.map { [URLQueryItem(name: "season", value: String($0))] } ?? [])
+    }
+
+    func syncRankings() async throws -> RankingsSummary {
+        try await send("api/rankings/sync", method: "POST", timeout: 180)
     }
 
     func checkHealth() async throws {
@@ -104,8 +121,8 @@ struct NotesServiceClient: NotesService {
 
     // MARK: Plumbing
 
-    private func send<T: Decodable>(_ path: String, method: String = "GET", query: [URLQueryItem] = [], body: [String: String]? = nil) async throws -> T {
-        let data = try await perform(path, method: method, query: query, body: body)
+    private func send<T: Decodable>(_ path: String, method: String = "GET", query: [URLQueryItem] = [], body: [String: String]? = nil, timeout: TimeInterval = 20) async throws -> T {
+        let data = try await perform(path, method: method, query: query, body: body, timeout: timeout)
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
@@ -114,14 +131,14 @@ struct NotesServiceClient: NotesService {
     }
 
     private func sendEmpty(_ path: String, method: String) async throws {
-        _ = try await perform(path, method: method, query: [], body: nil)
+        _ = try await perform(path, method: method, query: [], body: nil, timeout: 20)
     }
 
-    private func perform(_ path: String, method: String, query: [URLQueryItem], body: [String: String]?) async throws -> Data {
+    private func perform(_ path: String, method: String, query: [URLQueryItem], body: [String: String]?, timeout: TimeInterval) async throws -> Data {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
 
-        var request = URLRequest(url: components.url!, timeoutInterval: 20)
+        var request = URLRequest(url: components.url!, timeoutInterval: timeout)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty {

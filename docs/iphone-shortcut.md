@@ -11,8 +11,8 @@ The phone needs to reach the notes service: on home Wi-Fi directly, or from anyw
    - Use the IP address, not `something.local`. `.local` names don't resolve over WireGuard.
    - **Reserve that IP** in your router's DHCP settings (or Pi-hole's, if it does DHCP) so it doesn't change. Otherwise the Shortcut breaks whenever the Mac gets a new address.
    - When the service moves to the OptiPlex, use its address (`http://192.168.10.135:3030`) instead.
-2. **Token.** The value of `NOTES_TOKEN` in the repo's `.env` file.
-3. **Quick check.** On the phone, open Safari to `http://<address>:3030`. You should see the Riot Report Inbox page. If you don't, fix that first: check the address, that WireGuard is connected, and that the service is running.
+2. **Token.** The value of `NOTES_TOKEN` in the repo's `.env` file. The Shortcut uses this token instead of your login, so it never asks for a password.
+3. **Quick check.** On the phone, open Safari to `http://<address>:3030` and log in with `NOTES_USER` / `NOTES_PASSWORD`. Let Safari save the password. You should see the Riot Report Inbox page. If you don't, fix that first: check the address, that WireGuard is connected, and that the service is running.
    - If you use a VPN on the Mac, make sure it allows local network (LAN) connections, or nothing on your network can reach the Mac.
 
 ## Build the Shortcut

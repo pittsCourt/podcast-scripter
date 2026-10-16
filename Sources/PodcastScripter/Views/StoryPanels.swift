@@ -22,7 +22,14 @@ struct StoryQueuePanel: View {
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         ForEach(store.filteredQueue) { item in
-                            StoryQueueRow(item: item, isSelected: store.selectedQueueIDs.contains(item.id)) {
+                            SelectableStoryRow(
+                                title: item.title,
+                                detail: item.body,
+                                meta: [item.source, item.createdAt.formatted(.relative(presentation: .named))].compactMap { $0 },
+                                kind: item.kind,
+                                url: item.url,
+                                isSelected: store.selectedStoryIDs.contains(item.id)
+                            ) {
                                 store.toggleSelection(item.id)
                             }
                         }
@@ -30,20 +37,6 @@ struct StoryQueuePanel: View {
                     .padding(8)
                 }
             }
-
-            Divider().overlay(Theme.border)
-            HStack(spacing: 8) {
-                Text(store.selectedQueueIDs.isEmpty ? "Select stories to start a project" : "\(store.selectedQueueIDs.count) selected")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                Spacer()
-                Button("Delete") { Task { await store.deleteSelected() } }
-                    .buttonStyle(SecondaryButtonStyle())
-                Button("New Project") { Task { await store.createProjectFromSelected() } }
-                    .buttonStyle(PrimaryButtonStyle())
-            }
-            .disabled(store.selectedQueueIDs.isEmpty)
-            .padding(12)
         }
         .frame(maxHeight: .infinity)
         .card()
@@ -53,8 +46,143 @@ struct StoryQueuePanel: View {
     }
 }
 
-private struct StoryQueueRow: View {
-    var item: StoryItem
+/// RSL News or League News, pulled from the notes service's RSS feeds.
+struct NewsPanel: View {
+    @Environment(AppStore.self) private var store
+    var category: NewsCategory
+
+    private var title: String {
+        category == .team ? "\(ShowConfig.teamName) News" : "League News"
+    }
+
+    var body: some View {
+        let items = store.news(in: category)
+        VStack(spacing: 0) {
+            SectionHeader(title: title, count: items.count)
+            Divider().overlay(Theme.border)
+
+            if items.isEmpty {
+                EmptyState(
+                    title: store.connection == .connecting ? "Loading…" : "No news",
+                    systemImage: "newspaper",
+                    message: store.searchText.isEmpty ? nil : "Nothing matches your search."
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(items) { news in
+                            SelectableStoryRow(
+                                title: news.headline,
+                                detail: news.summary,
+                                meta: [news.source, news.publishedAt.formatted(.relative(presentation: .named))].filter { !$0.isEmpty },
+                                kind: nil,
+                                url: news.url,
+                                isSelected: store.selectedStoryIDs.contains(news.id)
+                            ) {
+                                store.toggleSelection(news.id)
+                            }
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .card()
+    }
+}
+
+/// Count, Clear, Delete and New Project for everything selected across the queue and news columns.
+struct SelectionBar: View {
+    @Environment(AppStore.self) private var store
+    @State private var choosingProject = false
+
+    var body: some View {
+        let count = store.selectedStoryIDs.count
+        HStack(spacing: 8) {
+            if count == 0 {
+                Text("Select stories from the queue or news to add to a project")
+                    .foregroundStyle(Theme.textTertiary)
+            } else {
+                Text("\(count) \(count == 1 ? "story" : "stories") selected")
+                    .foregroundStyle(Theme.textPrimary)
+                Button("Clear") { store.clearSelection() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer()
+            Group {
+                Button("Delete") { Task { await store.deleteSelected() } }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .help("Remove from the queue and news (it stays in the inbox page's history)")
+                Button("Add to Project…") { choosingProject = true }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(store.projects.isEmpty)
+                    .help("Add the selected stories to an existing project")
+                    .popover(isPresented: $choosingProject, arrowEdge: .top) {
+                        ProjectPicker { id in
+                            choosingProject = false
+                            Task { await store.addSelected(toProject: id) }
+                        }
+                    }
+                Button("New Project") { Task { await store.createProjectFromSelected() } }
+                    .buttonStyle(PrimaryButtonStyle())
+            }
+            .disabled(count == 0)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .card()
+    }
+}
+
+/// Projects to add the selection to, newest episode first.
+private struct ProjectPicker: View {
+    @Environment(AppStore.self) private var store
+    var onPick: (Project.ID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GroupLabel(text: "Add to project")
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(store.projects.sorted { $0.episodeDate > $1.episodeDate }) { project in
+                        HoverRow { _ in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(project.name)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.textPrimary)
+                                Text("\(project.episodeDate.formatted(date: .abbreviated, time: .omitted))  ·  \(project.notes.count) stories")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                        }
+                        .onTapGesture { onPick(project.id) }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 6)
+            }
+            .frame(maxHeight: 320)
+        }
+        .frame(width: 280)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A checkbox row used by the queue and news panels.
+private struct SelectableStoryRow: View {
+    var title: String
+    var detail: String
+    var meta: [String]
+    var kind: StoryKind?
+    var url: URL?
     var isSelected: Bool
     var toggle: () -> Void
 
@@ -64,25 +192,26 @@ private struct StoryQueueRow: View {
                 Checkbox(isOn: isSelected)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(item.title)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(title)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
+                            .lineLimit(kind == nil ? 3 : 1)
                         Spacer(minLength: 4)
-                        KindBadge(kind: item.kind)
+                        if let kind { KindBadge(kind: kind) }
                     }
-                    if !item.body.isEmpty {
-                        Text(item.body)
+                    if !detail.isEmpty {
+                        Text(detail)
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(3)
                     }
                     HStack(spacing: 6) {
-                        Text(meta)
+                        Text(meta.joined(separator: "  ·  "))
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textTertiary)
-                        if let url = item.url {
+                            .lineLimit(1)
+                        if let url {
                             Button {
                                 NSWorkspace.shared.open(url)
                             } label: {
@@ -99,12 +228,6 @@ private struct StoryQueueRow: View {
             .padding(10)
         }
         .onTapGesture(perform: toggle)
-    }
-
-    private var meta: String {
-        [item.source, item.createdAt.formatted(.relative(presentation: .named))]
-            .compactMap { $0 }
-            .joined(separator: "  ·  ")
     }
 }
 
@@ -158,7 +281,7 @@ private struct Checkbox: View {
     }
 }
 
-private struct KindBadge: View {
+struct KindBadge: View {
     var kind: StoryKind
 
     var body: some View {
@@ -175,6 +298,7 @@ private struct KindBadge: View {
         case .xPost: Color(hex: 0x60A5FA)
         case .storyNote: Color(hex: 0xFBBF24)
         case .article: Color(hex: 0xA78BFA)
+        case .news: Color(hex: 0x34D399)
         }
     }
 }

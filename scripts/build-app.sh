@@ -30,7 +30,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <!-- The notes service is plain HTTP on localhost or the home network (reached remotely over WireGuard). -->
     <key>NSAppTransportSecurity</key>
-    <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+    <!-- The article reader (WKWebView) can also open plain-HTTP news sites. -->
+    <dict><key>NSAllowsLocalNetworking</key><true/><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>
     <key>NSLocalNetworkUsageDescription</key><string>Connects to your notes service on your home network.</string>
 </dict>
 </plist>

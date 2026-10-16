@@ -2,16 +2,31 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(AppStore.self) private var store
+    // Column proportions, saved between launches. Drag the borders to change them.
+    @AppStorage("home.projectsFraction") private var projectsFraction = HomeView.defaultProjectsFraction
+    @AppStorage("home.queueFraction") private var queueFraction = HomeView.defaultQueueFraction
+    static let defaultProjectsFraction = 0.22
+    static let defaultQueueFraction = 0.5
 
     var body: some View {
         @Bindable var store = store
-        HStack(spacing: 12) {
+        SplitPair(fraction: $projectsFraction, defaultFraction: Self.defaultProjectsFraction, minLeading: 220, minTrailing: 612) {
             ProjectsPanel()
+        } trailing: {
             VStack(spacing: 12) {
-                StoryQueuePanel()
-                StoryTrackerPanel()
+                SplitPair(fraction: $queueFraction, defaultFraction: Self.defaultQueueFraction, minLeading: 300, minTrailing: 300) {
+                    VStack(spacing: 12) {
+                        StoryQueuePanel()
+                        StoryTrackerPanel()
+                    }
+                } trailing: {
+                    VStack(spacing: 12) {
+                        NewsPanel(category: .team)
+                        NewsPanel(category: .league)
+                    }
+                }
+                SelectionBar()
             }
-            .frame(width: 400)
         }
         .padding(12)
         .searchable(text: $store.searchText, placement: .toolbar, prompt: "Search")

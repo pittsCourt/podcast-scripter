@@ -6,6 +6,13 @@ enum Route: Hashable {
     case editor(Project.ID)
 }
 
+enum SidebarSyncState: Equatable {
+    case idle
+    case syncing
+    case synced(Date)
+    case failed(String)
+}
+
 enum ConnectionState: Equatable {
     case connecting
     case online(lastSync: Date)
@@ -28,14 +35,23 @@ final class AppStore {
     var trackedStories: [TrackedStory] = []
 
     // Fetched from the notes service; not persisted
-    var rankings: [RankingGroup] = MockRankings.groups
+    /// Power rankings, synced on launch and with the banner's Sync button.
+    var rankings: RankingsSummary?
+    var rankingsSync: SidebarSyncState = .idle
+    /// Earlier seasons, loaded when picked in the Rankings tab.
+    var pastRankings: [Int: RankingsSummary] = [:]
     var news: [NewsItem] = []
+    // Sidebar data (standings, matches): synced on launch and with the Sync button only.
+    var standings: Standings?
+    var matches: Matches?
+    var sidebarSync: SidebarSyncState = .idle
     var connection: ConnectionState = .connecting
 
     // UI state
     var route: Route = .home
     var searchText = ""
-    var selectedQueueIDs: Set<StoryItem.ID> = []
+    /// Selected story-queue items and news stories (their IDs never collide).
+    var selectedStoryIDs: Set<UUID> = []
     var lastError: String?
 
     private var service: NotesService
@@ -88,19 +104,72 @@ final class AppStore {
     func refresh() async {
         do {
             async let inbox = service.fetchInbox()
-            async let teamNews = service.fetchNews(category: .team, limit: 15)
-            async let leagueNews = service.fetchNews(category: .league, limit: 15)
+            async let teamNews = service.fetchNews(category: .team, limit: 40)
+            async let leagueNews = service.fetchNews(category: .league, limit: 40)
             let (items, team, league) = try await (inbox, teamNews, leagueNews)
 
             if items != storyQueue {
                 storyQueue = items
-                selectedQueueIDs.formIntersection(items.map(\.id))
                 save()
             }
             news = team + league
+            selectedStoryIDs.formIntersection(storyQueue.map(\.id) + news.map(\.id))
             connection = .online(lastSync: Date())
         } catch {
             connection = .offline(reason: error.localizedDescription)
+        }
+    }
+
+    /// Loads the standings and matches. `force` (the Sync button) bypasses the service's cache.
+    func syncSidebar(force: Bool) async {
+        guard sidebarSync != .syncing else { return }
+        sidebarSync = .syncing
+        let service = service
+        async let standingsResult = capture { try await service.fetchStandings(refresh: force) }
+        async let matchesResult = capture { try await service.fetchMatches(refresh: force) }
+        let (standingsOutcome, matchesOutcome) = await (standingsResult, matchesResult)
+
+        var failures: [String] = []
+        switch standingsOutcome {
+        case .success(let value): standings = value
+        case .failure(let error): failures.append(error.localizedDescription)
+        }
+        switch matchesOutcome {
+        case .success(let value): matches = value
+        case .failure(let error): failures.append(error.localizedDescription)
+        }
+        sidebarSync = failures.isEmpty ? .synced(Date()) : .failed(failures[0])
+    }
+
+    /// Shows the saved rankings right away, then fetches every source.
+    func syncRankings() async {
+        guard rankingsSync != .syncing else { return }
+        rankingsSync = .syncing
+        if rankings == nil, let saved = try? await service.fetchRankings(season: nil) {
+            rankings = saved
+        }
+        do {
+            rankings = try await service.syncRankings()
+            rankingsSync = .synced(Date())
+        } catch {
+            rankingsSync = .failed(error.localizedDescription)
+        }
+    }
+
+    /// The rankings to graph for `season`: the live copy for the current season, else a saved one.
+    func rankings(for season: Int) async -> RankingsSummary? {
+        if let rankings, rankings.season == season { return rankings }
+        if let cached = pastRankings[season] { return cached }
+        let loaded = try? await service.fetchRankings(season: season)
+        pastRankings[season] = loaded
+        return loaded
+    }
+
+    private nonisolated func capture<T: Sendable>(_ operation: @Sendable () async throws -> T) async -> Result<T, Error> {
+        do {
+            return .success(try await operation())
+        } catch {
+            return .failure(error)
         }
     }
 
@@ -171,9 +240,13 @@ final class AppStore {
         projects.first { $0.id == id }
     }
 
+    /// New projects start from the show template (sections, intro and outro).
     @discardableResult
     func createProject(name: String, date: Date, notes: [StoryItem] = []) -> Project {
-        let project = Project(name: name, episodeDate: date, notes: notes)
+        var project = Project(name: name, episodeDate: date, notes: notes)
+        let script = ScriptTemplate.make(for: date)
+        project.script = script.string
+        project.richText = ScriptStyle.rtfData(script)
         projects.append(project)
         save()
         return project
@@ -207,46 +280,82 @@ final class AppStore {
         }
     }
 
-    func toggleSelection(_ id: StoryItem.ID) {
-        if selectedQueueIDs.contains(id) {
-            selectedQueueIDs.remove(id)
+    func toggleSelection(_ id: UUID) {
+        if selectedStoryIDs.contains(id) {
+            selectedStoryIDs.remove(id)
         } else {
-            selectedQueueIDs.insert(id)
+            selectedStoryIDs.insert(id)
         }
     }
 
-    /// Copies the selected queue items into a new project, opens it, and marks them used in the service.
+    func clearSelection() {
+        selectedStoryIDs.removeAll()
+    }
+
+    /// Selected queue items and news, in on-screen order (queue first).
+    private var selectedStories: [StoryItem] {
+        storyQueue.filter { selectedStoryIDs.contains($0.id) }
+            + news.filter { selectedStoryIDs.contains($0.id) }.map(\.asStoryItem)
+    }
+
+    /// Copies the selected stories into a new project, opens it, and marks them used in the service
+    /// so they leave the queue and news columns.
     func createProjectFromSelected() async {
-        let selected = storyQueue.filter { selectedQueueIDs.contains($0.id) }
+        let selected = selectedStories
         guard !selected.isEmpty else { return }
         let project = createProject(
             name: "\(ShowConfig.teamName) \(ShowConfig.showName)",
             date: Date(),
             notes: selected
         )
-        storyQueue.removeAll { selectedQueueIDs.contains($0.id) }
-        selectedQueueIDs.removeAll()
-        save()
+        removeLocally(selected.map(\.id))
         open(project.id)
 
         do {
-            for item in selected { try await service.markUsed(item.id) }
+            for item in selected { try await service.setStatus(item.id, .used) }
         } catch {
-            lastError = "The project was created, but some stories couldn't be marked as used, so they may reappear in the queue. \(error.localizedDescription)"
+            lastError = "The project was created, but some stories couldn't be marked as used, so they may reappear. \(error.localizedDescription)"
         }
     }
 
+    /// Appends the selected stories to an existing project (skipping ones it already has), opens it,
+    /// and marks them used in the service.
+    func addSelected(toProject id: Project.ID) async {
+        guard var project = project(id) else { return }
+        let existing = Set(project.notes.map(\.id))
+        let selected = selectedStories
+        guard !selected.isEmpty else { return }
+        project.notes += selected.filter { !existing.contains($0.id) }
+        updateProject(project)
+        removeLocally(selected.map(\.id))
+        open(id)
+
+        do {
+            for item in selected { try await service.setStatus(item.id, .used) }
+        } catch {
+            lastError = "The stories were added, but some couldn't be marked as used, so they may reappear. \(error.localizedDescription)"
+        }
+    }
+
+    /// Hides the selected stories. They're dismissed rather than deleted, so they stay in the
+    /// service's history (and news feeds don't re-add them).
     func deleteSelected() async {
-        for id in selectedQueueIDs {
+        for item in selectedStories {
             do {
-                try await service.delete(id)
-                storyQueue.removeAll { $0.id == id }
-                selectedQueueIDs.remove(id)
+                try await service.setStatus(item.id, .dismissed)
+                removeLocally([item.id])
             } catch {
                 lastError = "Couldn't delete from the notes service: \(error.localizedDescription)"
                 break
             }
         }
+    }
+
+    private func removeLocally(_ ids: [UUID]) {
+        let ids = Set(ids)
+        storyQueue.removeAll { ids.contains($0.id) }
+        news.removeAll { ids.contains($0.id) }
+        selectedStoryIDs.subtract(ids)
         save()
     }
 
@@ -303,6 +412,11 @@ final class AppStore {
     // MARK: - News
 
     func news(in category: NewsCategory) -> [NewsItem] {
-        news.filter { $0.category == category }
+        news.filter {
+            $0.category == category
+                && (searchText.isEmpty
+                    || $0.headline.localizedCaseInsensitiveContains(searchText)
+                    || $0.source.localizedCaseInsensitiveContains(searchText))
+        }
     }
 }

@@ -10,10 +10,16 @@ struct PodcastScripterApp: App {
         WindowGroup(ShowConfig.showName) {
             ContentView()
                 .environment(store)
-                .frame(minWidth: 1100, minHeight: 680)
+                .frame(minWidth: 1240, minHeight: 680)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
-                .task { await store.runRefreshLoop() }
+                .task {
+                    // The sidebar syncs once on open; the queue keeps checking for phone shares.
+                    async let sidebar: Void = store.syncSidebar(force: false)
+                    async let rankings: Void = store.syncRankings()
+                    async let queue: Void = store.runRefreshLoop()
+                    _ = await (sidebar, rankings, queue)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     Task { await store.refresh() }
                 }
@@ -21,8 +27,9 @@ struct PodcastScripterApp: App {
                     store.save()
                 }
         }
-        .defaultSize(width: 1440, height: 900)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .defaultSize(width: 1500, height: 920)
+        .windowToolbarStyle(.unified(showsTitle: false))
+        .commands { FormatCommands() }
 
         Settings {
             SettingsView()
@@ -47,14 +54,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct ContentView: View {
     @Environment(AppStore.self) private var store
+    @AppStorage("showInfoSidebar") private var showSidebar = true
 
     var body: some View {
-        Group {
-            switch store.route {
-            case .home:
-                HomeView()
-            case .editor(let id):
-                EditorView(projectID: id)
+        HStack(spacing: 0) {
+            Group {
+                switch store.route {
+                case .home:
+                    HomeView()
+                case .editor(let id):
+                    EditorView(projectID: id)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showSidebar {
+                InfoSidebar()
+                    .frame(width: 340)
+                    .padding([.vertical, .trailing], 12)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -75,6 +93,15 @@ struct ContentView: View {
             }
             ToolbarItem(placement: .principal) {
                 RankingsBanner()
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showSidebar.toggle() }
+                } label: {
+                    Label(showSidebar ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.right")
+                }
+                .help("\(showSidebar ? "Hide" : "Show") the MLS table and matches (⌃⌘S)")
+                .keyboardShortcut("s", modifiers: [.command, .control])
             }
             ToolbarItem(placement: .primaryAction) {
                 UserMenu()

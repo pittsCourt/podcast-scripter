@@ -7,7 +7,13 @@ services:
     volumes:
       - ./services/notes/data:/app/data
     environment:
-      # Set in .env (not committed). Leave empty to disable auth (local testing only).
-      NOTES_TOKEN: ${NOTES_TOKEN:-}
+      # Set in .env (not committed). With none of these set, the service is open (local testing only).
+      NOTES_USER: ${NOTES_USER:-}          # browser login (the inbox page)
+      NOTES_PASSWORD: ${NOTES_PASSWORD:-}
+      NOTES_TOKEN: ${NOTES_TOKEN:-}        # Mac app and iPhone Shortcut
       FEED_INTERVAL_MINUTES: ${FEED_INTERVAL_MINUTES:-30}
+      # Power rankings: TacticsFreeZone arrives by email, read from Gmail over IMAP.
+      GMAIL_USER: ${GMAIL_USER:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      TFZ_FORWARDED_FROM: ${TFZ_FORWARDED_FROM:-}   # older issues forwarded in from another inbox
     restart: unless-stopped

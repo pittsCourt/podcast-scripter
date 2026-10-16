@@ -36,7 +36,14 @@
     button:disabled { opacity: .5; }
     .msg { margin: 10px 2px 0; font-size: 13px; min-height: 18px; color: var(--text2); }
     .msg.error { color: var(--bad); }
-    ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 8px; }
+    .tabs { display: flex; gap: 6px; margin: 18px 0 4px; }
+    .tabs button { background: var(--surface); color: var(--text2); border: 1px solid var(--border); font-weight: 500; padding: 7px 12px; }
+    .tabs button.active { background: rgba(214,48,79,.15); color: var(--text); border-color: rgba(214,48,79,.45); }
+    .tabs .n { color: var(--text3); margin-left: 4px; font-variant-numeric: tabular-nums; }
+    h2 { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text3); margin: 22px 2px 8px; }
+    ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    li.done { opacity: .62; }
+    .status { font-size: 11px; color: var(--text3); white-space: nowrap; }
     li { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
     .top { display: flex; gap: 8px; align-items: baseline; }
     .title { font-weight: 600; font-size: 14px; flex: 1; overflow-wrap: anywhere; }
@@ -47,13 +54,15 @@
     .body { color: var(--text2); font-size: 13px; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .meta { display: flex; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--text3); }
     .meta a { color: var(--text2); text-decoration: none; }
-    .meta .del { margin-left: auto; background: none; color: var(--text3); padding: 0; font-size: 12px; font-weight: 500; }
-    .empty { color: var(--text3); text-align: center; padding: 32px 0; }
+    .meta button { background: none; padding: 0; font-size: 12px; font-weight: 500; }
+    .meta .link { color: var(--text2); }
+    .meta .del { margin-left: auto; color: var(--text3); }
+    .empty { color: var(--text3); text-align: center; padding: 32px 0; margin: 0; }
   </style>
 </head>
 <body>
 <main>
-  <h1>Riot Report Inbox <span id="count"></span></h1>
+  <h1>Riot Report Inbox</h1>
   <form id="add">
     <textarea id="input" placeholder="Paste an X post or article link, or type a note…" autocapitalize="sentences"></textarea>
     <div class="row">
@@ -62,7 +71,12 @@
     </div>
   </form>
   <div class="msg" id="msg"></div>
-  <ul id="list"></ul>
+  <nav class="tabs">
+    <button type="button" data-filter="all">All<span class="n"></span></button>
+    <button type="button" data-filter="inbox">Queue<span class="n"></span></button>
+    <button type="button" data-filter="used">Used<span class="n"></span></button>
+  </nav>
+  <div id="list"></div>
 </main>
 <script src="app.js"></script>
 </body>

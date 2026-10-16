@@ -5,7 +5,10 @@ struct Project: Identifiable, Codable, Hashable {
     var id = UUID()
     var name: String
     var episodeDate: Date
+    /// Plain-text copy of the script, used for word counts, search and plain-text export.
     var script: String = ""
+    /// The formatted script (RTF). Nil for scripts written before formatting existed.
+    var richText: Data?
     /// Story-queue items the project was created from.
     var notes: [StoryItem] = []
     var createdAt = Date()
@@ -29,12 +32,14 @@ enum StoryKind: String, Codable, CaseIterable {
     case xPost
     case storyNote
     case article
+    case news
 
     var label: String {
         switch self {
         case .xPost: "X post"
         case .storyNote: "Story/Note"
         case .article: "Article"
+        case .news: "News"
         }
     }
 
@@ -43,6 +48,7 @@ enum StoryKind: String, Codable, CaseIterable {
         case .xPost: "bubble.left"
         case .storyNote: "note.text"
         case .article: "newspaper"
+        case .news: "globe"
         }
     }
 }
@@ -66,18 +72,118 @@ struct TrackedStory: Identifiable, Codable, Hashable {
     var lastUpdated = Date()
 }
 
-struct RankingEntry: Identifiable, Hashable, Sendable {
-    var id: String { source }
-    var source: String
-    var rank: Int
-    /// Positive = moved up.
-    var change: Int
+/// Power rankings from the notes service's /api/rankings: one entry per source, with season history.
+struct RankingsSummary: Decodable, Equatable, Sendable {
+    var season: Int
+    /// Every season with saved rankings, newest first.
+    var seasons: [Int]
+    var sources: [RankingSource]
 }
 
-struct RankingGroup: Identifiable, Hashable, Sendable {
-    var id: String { title }
-    var title: String
-    var entries: [RankingEntry]
+struct RankingSource: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var name: String
+    /// "League", "Region" or "World".
+    var group: String
+    /// Teams in the ranking when it's fixed (30 for MLS lists), else nil.
+    var scale: Int?
+    var latest: RankPoint?
+    var previousRank: Int?
+    var history: [RankPoint]
+    var checkedAt: String?
+    var error: String?
+
+    /// Places moved since the previous ranking; positive means up.
+    var change: Int? {
+        guard let latest, let previousRank else { return nil }
+        return previousRank - latest.rank
+    }
+}
+
+struct RankPoint: Decodable, Equatable, Sendable, Identifiable {
+    /// YYYY-MM-DD the ranking was published.
+    var date: String
+    var rank: Int
+    var label: String?
+    var url: URL?
+    var id: String { date }
+
+    var day: Date? { ISO8601.parse("\(date)T12:00:00Z") }
+}
+
+extension Int {
+    /// "1st", "22nd", "483rd".
+    var ordinal: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .ordinal
+        return formatter.string(from: NSNumber(value: self)) ?? String(self)
+    }
+}
+
+/// MLS tables from the notes service's /api/standings.
+struct Standings: Decodable, Equatable, Sendable {
+    var season: String
+    var updatedAt: String
+    var stale: Bool
+    var conferences: [StandingsTable]
+    var combined: [StandingsRow]
+}
+
+struct StandingsTable: Decodable, Equatable, Sendable, Identifiable {
+    var name: String
+    var rows: [StandingsRow]
+    var id: String { name }
+}
+
+struct StandingsRow: Decodable, Equatable, Sendable, Identifiable {
+    var rank: Int
+    var team: String
+    var shortName: String
+    var abbreviation: String
+    var logo: URL?
+    var played: Int
+    var wins: Int
+    var draws: Int
+    var losses: Int
+    var goalDifference: Int
+    var points: Int
+    /// "playoffs" (Round One), "wild_card", or nil.
+    var qualification: String?
+    var id: String { abbreviation }
+}
+
+/// The club's results and fixtures from the notes service's /api/matches.
+struct Matches: Decodable, Equatable, Sendable {
+    var team: MatchTeam
+    var results: [Match]
+    var upcoming: [Match]
+    var updatedAt: String
+    var stale: Bool
+}
+
+struct Match: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    /// ISO 8601 kickoff time.
+    var date: String
+    var competition: String
+    var venue: String?
+    var broadcast: String?
+    var isHome: Bool
+    var opponent: MatchTeam
+    var goalsFor: Int?
+    var goalsAgainst: Int?
+    /// "W", "D" or "L" once played.
+    var result: String?
+    var status: String
+
+    var kickoff: Date? { ISO8601.parse(date) ?? ISO8601.parse(date.replacingOccurrences(of: "Z", with: ":00Z")) }
+}
+
+struct MatchTeam: Decodable, Equatable, Sendable {
+    var name: String?
+    var shortName: String?
+    var abbreviation: String?
+    var logo: URL?
 }
 
 enum NewsCategory: String, Hashable, Sendable {
@@ -93,4 +199,9 @@ struct NewsItem: Identifiable, Hashable, Sendable {
     var source: String
     var publishedAt: Date
     var url: URL?
+
+    /// How a news story is kept once it's added to a project.
+    var asStoryItem: StoryItem {
+        StoryItem(id: id, kind: .news, title: headline, body: summary, source: source, url: url, createdAt: publishedAt)
+    }
 }

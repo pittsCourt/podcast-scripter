@@ -128,10 +128,11 @@ function listInbox({ status = 'inbox' } = {}) {
 }
 
 function listNews({ category, limit = 20 } = {}) {
+  // Used (put in a project) and dismissed news stays stored, so feeds don't re-add it, but isn't listed.
   const order = 'ORDER BY COALESCE(published_at, created_at) DESC LIMIT ?';
   const rows = category
-    ? db.prepare(`SELECT * FROM items WHERE kind = 'news' AND category = ? ${order}`).all(category, limit)
-    : db.prepare(`SELECT * FROM items WHERE kind = 'news' ${order}`).all(limit);
+    ? db.prepare(`SELECT * FROM items WHERE kind = 'news' AND status = 'inbox' AND category = ? ${order}`).all(category, limit)
+    : db.prepare(`SELECT * FROM items WHERE kind = 'news' AND status = 'inbox' ${order}`).all(limit);
   return rows.map(toItem);
 }
 
@@ -192,6 +193,7 @@ function itemCount() {
 }
 
 module.exports = {
+  connection: db,
   DATA_DIR,
   INBOX_KINDS,
   STATUSES,

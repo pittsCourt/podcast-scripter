@@ -8,6 +8,12 @@ let package = Package(
         .executableTarget(
             name: "PodcastScripter",
             path: "Sources/PodcastScripter"
-        )
+        ),
+        .testTarget(
+            name: "PodcastScripterTests",
+            dependencies: ["PodcastScripter"],
+            path: "Tests/PodcastScripterTests",
+            resources: [.copy("matches-sample.json"), .copy("rankings-sample.json")]
+        ),
     ]
 )

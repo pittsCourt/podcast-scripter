@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "fast-xml-parser": "^4.5.0"
+    "fast-xml-parser": "^4.5.0",
+    "imapflow": "^1.0.164",
+    "mailparser": "^3.7.1"
   },
   "engines": {
     "node": ">=22.13"

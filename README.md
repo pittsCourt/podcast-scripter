@@ -12,6 +12,7 @@ macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`). Full Xcod
 swift run                         # dev build, launches the app
 ./scripts/build-app.sh            # builds build/Podcast Scripter.app
 ./scripts/build-app.sh --install  # ...and copies it to /Applications
+./scripts/test.sh                 # runs the tests (works without Xcode)
 ```
 
 The app expects the notes service at `http://localhost:3030`. Change the address or token in Settings (⌘,). Without the service, the app still works and shows the last synced queue.
@@ -32,4 +33,6 @@ Projects, tracked stories and a cached copy of the queue are stored at `~/Librar
 - `docs/`: setup guides
 - `Sources/PodcastScripter/Store/AppStore.swift`: app state, JSON persistence, navigation
 - `Sources/PodcastScripter/Views`: home dashboard, editor, toolbar rankings banner, theme (`Theme.swift` holds colors and shared components)
+- `Sources/PodcastScripter/Views/Editor`: the formatted script editor (NSTextView), the format bar and Format menu, and RTF/Markdown conversion (`ScriptFormatting.swift`)
+- `Tests/`: tests for formatting, saving and export
 - `designs/`: the original mockups
