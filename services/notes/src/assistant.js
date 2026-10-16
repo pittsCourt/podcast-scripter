@@ -29,7 +29,7 @@ function persona() {
     + 'Be concise and specific. When you use something from a script, name the episode and its date. '
     + 'The host marks how solid information is: [RUMOR] … [/RUMOR] is unconfirmed talk, [REPORTED] … [/REPORTED] has been '
     + 'reported by media but not officially confirmed, and [CONFIRMED] … [/CONFIRMED] is confirmed. Tracked stories can carry the '
-    + 'same status, with a dated history. Keep these apart: never present a rumor or report as confirmed, say which it is when it '
+    + 'same status, with a dated history; [RESOLVED date: note] means the story is over and how it ended. Keep these apart: never present a rumor or report as confirmed, say which it is when it '
     + 'matters, and use the latest status when a story has changed. Unmarked text has no status. In your answer, say the status '
     + 'in plain words (e.g. "only a rumor so far", "reported but not confirmed", "confirmed") — never repeat the bracket tags.';
 }
@@ -127,7 +127,8 @@ function trackerText(stories = [], limit) {
       ? ` (status history: ${s.statusHistory.map((h) => `${statusLabel(h.status)} ${day(h.date)}`).join(' → ')})`
       : '';
     const status = s.status ? ` [status: ${statusLabel(s.status)}]${history}` : history;
-    return `* ${s.title}${status}${s.latestUpdate ? ` — latest: ${clip(s.latestUpdate, 200)}` : ''}${mentions.length ? `\n${mentions.join('\n')}` : ''}`;
+    const resolved = s.resolvedAt ? ` [RESOLVED ${day(s.resolvedAt)}${s.resolution ? `: ${clip(s.resolution, 200)}` : ''}]` : '';
+    return `* ${s.title}${status}${resolved}${s.latestUpdate ? ` — latest: ${clip(s.latestUpdate, 200)}` : ''}${mentions.length ? `\n${mentions.join('\n')}` : ''}`;
   });
   return clip('STORY TRACKER:\n' + blocks.join('\n'), limit);
 }

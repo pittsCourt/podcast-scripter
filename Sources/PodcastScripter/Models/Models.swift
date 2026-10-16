@@ -82,6 +82,12 @@ struct TrackedStory: Identifiable, Codable, Hashable {
     var status: StoryStatus?
     /// Every status change, oldest first, so you can see how the story developed.
     var statusHistory: [StatusChange] = []
+    /// Set when the story is wrapped up; it moves to the tracker's Resolved list.
+    var resolvedAt: Date?
+    /// How it ended, e.g. "Back in the lineup vs SKC".
+    var resolution: String?
+
+    var isResolved: Bool { resolvedAt != nil }
 
     init(id: UUID = UUID(), title: String, latestUpdate: String = "", lastUpdated: Date = Date(), mentions: [StoryMention] = [], status: StoryStatus? = nil, statusHistory: [StatusChange] = []) {
         self.id = id
@@ -103,6 +109,8 @@ struct TrackedStory: Identifiable, Codable, Hashable {
         mentions = try c.decodeIfPresent([StoryMention].self, forKey: .mentions) ?? []
         status = try? c.decodeIfPresent(StoryStatus.self, forKey: .status)
         statusHistory = (try? c.decodeIfPresent([StatusChange].self, forKey: .statusHistory)) ?? []
+        resolvedAt = try? c.decodeIfPresent(Date.self, forKey: .resolvedAt)
+        resolution = try? c.decodeIfPresent(String.self, forKey: .resolution)
     }
 
     /// Sets the status, recording the change (nil clears it). No-op if unchanged.

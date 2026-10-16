@@ -3,28 +3,26 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppStore.self) private var store
     // Column proportions, saved between launches. Drag the borders to change them.
-    @AppStorage("home.scriptsFraction") private var scriptsFraction = HomeView.defaultScriptsFraction
-    @AppStorage("home.queueFraction") private var queueFraction = HomeView.defaultQueueFraction
+    @AppStorage(Layout.scriptsKey) private var scriptsFraction = Layout.defaultScripts
+    @AppStorage(Layout.queueKey) private var queueFraction = Layout.defaultQueue
     // Heights of the stacked panels (top pane's share of the column).
-    @AppStorage("home.queueHeightFraction") private var queueHeightFraction = 0.5
-    @AppStorage("home.newsHeightFraction") private var newsHeightFraction = 0.5
-    static let defaultScriptsFraction = 0.22
-    static let defaultQueueFraction = 0.5
+    @AppStorage(Layout.queueHeightKey) private var queueHeightFraction = Layout.defaultQueueHeight
+    @AppStorage(Layout.newsHeightKey) private var newsHeightFraction = Layout.defaultNewsHeight
 
     var body: some View {
         @Bindable var store = store
-        SplitPair(fraction: $scriptsFraction, defaultFraction: Self.defaultScriptsFraction, minLeading: Zoom.s(220), minTrailing: Zoom.s(612)) {
+        SplitPair(fraction: $scriptsFraction, defaultFraction: Layout.defaultScripts, minLeading: Zoom.s(220), minTrailing: Zoom.s(612)) {
             ScriptsPanel()
         } trailing: {
             VStack(spacing: 12) {
-                SplitPair(fraction: $queueFraction, defaultFraction: Self.defaultQueueFraction, minLeading: Zoom.s(300), minTrailing: Zoom.s(300)) {
-                    SplitPair(axis: .vertical, fraction: $queueHeightFraction, defaultFraction: 0.5, minLeading: 150, minTrailing: 120) {
+                SplitPair(fraction: $queueFraction, defaultFraction: Layout.defaultQueue, minLeading: Zoom.s(300), minTrailing: Zoom.s(300)) {
+                    SplitPair(axis: .vertical, fraction: $queueHeightFraction, defaultFraction: Layout.defaultQueueHeight, minLeading: Zoom.s(150), minTrailing: Zoom.s(120)) {
                         StoryQueuePanel()
                     } trailing: {
                         StoryTrackerPanel()
                     }
                 } trailing: {
-                    SplitPair(axis: .vertical, fraction: $newsHeightFraction, defaultFraction: 0.5, minLeading: 140, minTrailing: 140) {
+                    SplitPair(axis: .vertical, fraction: $newsHeightFraction, defaultFraction: Layout.defaultNewsHeight, minLeading: Zoom.s(140), minTrailing: Zoom.s(140)) {
                         NewsPanel(category: .team)
                     } trailing: {
                         NewsPanel(category: .league)

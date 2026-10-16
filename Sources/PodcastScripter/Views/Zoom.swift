@@ -41,6 +41,9 @@ struct ZoomCommands: Commands {
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(zoom == 1.0)
             Divider()
+            Button("Reset Layout") { Layout.reset() }
+                .help("Put every column and panel back to its default size")
+            Divider()
         }
     }
 }

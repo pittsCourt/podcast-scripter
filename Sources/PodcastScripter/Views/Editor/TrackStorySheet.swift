@@ -25,7 +25,7 @@ struct TrackStorySheet: View {
     }
 
     private var matches: [TrackedStory] {
-        let stories = store.trackedStories.sorted { $0.lastUpdated > $1.lastUpdated }
+        let stories = store.trackedStories.filter { !$0.isResolved }.sorted { $0.lastUpdated > $1.lastUpdated }
         guard !search.isEmpty else { return stories }
         return stories.filter { $0.title.localizedCaseInsensitiveContains(search) }
     }

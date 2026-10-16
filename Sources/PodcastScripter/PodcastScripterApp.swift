@@ -75,7 +75,7 @@ private struct ZoomedContent: View {
 
 struct ContentView: View {
     @Environment(AppStore.self) private var store
-    @AppStorage("showInfoSidebar") private var showSidebar = true
+    @AppStorage(Layout.sidebarKey) private var showSidebar = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -166,6 +166,11 @@ private struct UserMenu: View {
             // Opens the Settings window (also ⌘, and the app menu).
             SettingsLink {
                 Label("Project Settings…", systemImage: "gearshape")
+            }
+            Button {
+                Layout.reset()
+            } label: {
+                Label("Reset Layout", systemImage: "rectangle.3.group")
             }
             Divider()
             Button("Reveal Data in Finder") {

@@ -388,7 +388,9 @@ final class AppStore {
                 AIMention(episode: $0.scriptName, date: Self.isoDay($0.episodeDate), excerpt: $0.excerpt, note: $0.note, status: $0.status?.rawValue)
             },
             status: story.status?.rawValue,
-            statusHistory: story.statusHistory.map { AIStatusChange(status: $0.status?.rawValue, date: Self.isoDay($0.changedAt)) }
+            statusHistory: story.statusHistory.map { AIStatusChange(status: $0.status?.rawValue, date: Self.isoDay($0.changedAt)) },
+            resolvedAt: story.resolvedAt.map(Self.isoDay),
+            resolution: story.resolution
         )
     }
 
@@ -449,9 +451,9 @@ final class AppStore {
 
     /// Stories to brief on: the ones tagged in this episode, else the most recently updated.
     func briefingStories(for scriptID: Script.ID) -> [TrackedStory] {
-        let tagged = trackedStories(in: scriptID)
+        let tagged = trackedStories(in: scriptID).filter { !$0.isResolved }
         if !tagged.isEmpty { return tagged }
-        return Array(trackedStories.sorted { $0.lastUpdated > $1.lastUpdated }.prefix(8))
+        return Array(trackedStories.filter { !$0.isResolved }.sorted { $0.lastUpdated > $1.lastUpdated }.prefix(8))
     }
 
     func briefing(for scriptID: Script.ID) async throws -> [StoryBriefing] {
@@ -640,6 +642,16 @@ final class AppStore {
         }
     }
 
+    /// Checks every story in `ids`, or unchecks them all if they're all checked already.
+    func toggleSelectAll(_ ids: [UUID]) {
+        let all = Set(ids)
+        if !all.isEmpty, all.isSubset(of: selectedStoryIDs) {
+            selectedStoryIDs.subtract(all)
+        } else {
+            selectedStoryIDs.formUnion(all)
+        }
+    }
+
     func clearSelection() {
         selectedStoryIDs.removeAll()
     }
@@ -759,9 +771,38 @@ final class AppStore {
 
     // MARK: - Story tracker
 
+    /// Stories still being followed (search applies).
     var filteredTrackedStories: [TrackedStory] {
-        guard !searchText.isEmpty else { return trackedStories }
-        return trackedStories.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+        trackedStories.filter { !$0.isResolved && matchesSearch($0) }
+    }
+
+    /// Wrapped-up stories, most recently resolved first (search applies).
+    var resolvedStories: [TrackedStory] {
+        trackedStories.filter { $0.isResolved && matchesSearch($0) }
+            .sorted { ($0.resolvedAt ?? .distantPast) > ($1.resolvedAt ?? .distantPast) }
+    }
+
+    private func matchesSearch(_ story: TrackedStory) -> Bool {
+        searchText.isEmpty || story.title.localizedCaseInsensitiveContains(searchText)
+    }
+
+    /// Moves a story to the Resolved list, with an optional note on how it ended.
+    func resolveStory(_ id: TrackedStory.ID, resolution: String?) {
+        guard let i = trackedStories.firstIndex(where: { $0.id == id }) else { return }
+        let note = resolution?.trimmingCharacters(in: .whitespacesAndNewlines)
+        trackedStories[i].resolvedAt = Date()
+        trackedStories[i].resolution = note?.isEmpty == false ? note : nil
+        trackedStories[i].lastUpdated = Date()
+        save()
+    }
+
+    /// Brings a resolved story back to the active tracker.
+    func reopenStory(_ id: TrackedStory.ID) {
+        guard let i = trackedStories.firstIndex(where: { $0.id == id }) else { return }
+        trackedStories[i].resolvedAt = nil
+        trackedStories[i].resolution = nil
+        trackedStories[i].lastUpdated = Date()
+        save()
     }
 
     func addTrackedStory(title: String) {

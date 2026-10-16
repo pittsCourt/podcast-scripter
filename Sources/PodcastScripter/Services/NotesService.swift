@@ -150,6 +150,9 @@ struct AIStory: Encodable, Sendable {
     var status: String?
     /// e.g. [{"status": "rumor", "date": "2026-10-03"}, {"status": "confirmed", "date": "2026-10-12"}]
     var statusHistory: [AIStatusChange]
+    /// YYYY-MM-DD when the story was resolved, and how it ended.
+    var resolvedAt: String?
+    var resolution: String?
 }
 
 struct AIStatusChange: Encodable, Sendable {

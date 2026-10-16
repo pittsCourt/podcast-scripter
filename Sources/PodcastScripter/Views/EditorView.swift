@@ -146,6 +146,25 @@ private struct StorySidebar: View {
                     message: "Select stories on the home page and click New Script to bring them in."
                 )
             } else {
+                // Select all, for Return to Queue.
+                HStack(spacing: 8) {
+                    let all = Set(script.notes.map(\.id))
+                    Button {
+                        if all.isSubset(of: selected) { selected.subtract(all) } else { selected.formUnion(all) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Checkbox(isOn: all.isSubset(of: selected), isMixed: !selected.isEmpty && !all.isSubset(of: selected))
+                            Text("Select all")
+                                .font(.system(size: Zoom.s(11.5)))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         ForEach(script.notes) { story in

@@ -8,6 +8,7 @@ struct StoryQueuePanel: View {
     var body: some View {
         VStack(spacing: 0) {
             SectionHeader(title: "Story Queue", count: store.storyQueue.count) {
+                SelectAllCheckbox(ids: store.filteredQueue.map(\.id))
                 ConnectionIndicator(state: store.connection)
                 IconButton(systemName: "arrow.clockwise", help: "Refresh from the notes service") {
                     Task { await store.refresh() }
@@ -58,7 +59,9 @@ struct NewsPanel: View {
     var body: some View {
         let items = store.news(in: category)
         VStack(spacing: 0) {
-            SectionHeader(title: title, count: items.count)
+            SectionHeader(title: title, count: items.count) {
+                SelectAllCheckbox(ids: items.map(\.id))
+            }
             Divider().overlay(Theme.border)
 
             if items.isEmpty {
@@ -271,17 +274,20 @@ private struct ConnectionIndicator: View {
 
 struct Checkbox: View {
     var isOn: Bool
+    /// Some but not all selected (shown as a dash), for "select all".
+    var isMixed = false
 
     var body: some View {
+        let filled = isOn || isMixed
         RoundedRectangle(cornerRadius: 4, style: .continuous)
-            .fill(isOn ? Theme.accent : .clear)
+            .fill(filled ? Theme.accent : .clear)
             .overlay(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .strokeBorder(isOn ? Theme.accent : Theme.textTertiary, lineWidth: 1.25)
+                    .strokeBorder(filled ? Theme.accent : Theme.textTertiary, lineWidth: 1.25)
             )
             .overlay {
-                if isOn {
-                    Image(systemName: "checkmark")
+                if isOn || isMixed {
+                    Image(systemName: isOn ? "checkmark" : "minus")
                         .font(.system(size: Zoom.s(9), weight: .bold))
                         .foregroundStyle(.white)
                 }
@@ -366,24 +372,46 @@ struct StoryTrackerPanel: View {
     @State private var adding = false
     @State private var editing: TrackedStory?
     @State private var pendingStop: TrackedStory?
+    @AppStorage("trackerShowsResolved") private var showResolved = false
 
     var body: some View {
+        let stories = showResolved ? store.resolvedStories : store.filteredTrackedStories
         VStack(spacing: 0) {
-            SectionHeader(title: "Story Tracker", count: store.trackedStories.count) {
-                IconButton(systemName: "plus", help: "Track a new story") { adding = true }
+            SectionHeader(title: "Story Tracker", count: store.filteredTrackedStories.count) {
+                Picker("Show", selection: $showResolved) {
+                    Text("Active").tag(false)
+                    Text("Resolved (\(store.resolvedStories.count))").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .controlSize(.small)
+                IconButton(systemName: "plus", help: "Track a new story") {
+                    showResolved = false
+                    adding = true
+                }
             }
             Divider().overlay(Theme.border)
 
-            if store.filteredTrackedStories.isEmpty {
-                EmptyState(title: "Nothing tracked", systemImage: "binoculars")
+            if stories.isEmpty {
+                EmptyState(
+                    title: showResolved ? "No resolved stories" : "Nothing tracked",
+                    systemImage: showResolved ? "checkmark.seal" : "binoculars",
+                    message: showResolved ? "Open a tracked story and choose Resolve Story when it’s over." : nil
+                )
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(store.filteredTrackedStories) { story in
+                        ForEach(stories) { story in
                             TrackedStoryRow(story: story)
                                 .onTapGesture { editing = story }
                                 .contextMenu {
-                                    Button("Edit…") { editing = story }
+                                    Button("Open…") { editing = story }
+                                    if story.isResolved {
+                                        Button("Reopen") { store.reopenStory(story.id) }
+                                    } else {
+                                        Button("Resolve") { store.resolveStory(story.id, resolution: nil) }
+                                    }
                                     Menu("Status") {
                                         ForEach(StoryStatus.allCases) { status in
                                             Button("\(status.emoji)  \(status.label)") { store.setStatus(status, ofStory: story.id) }
@@ -412,7 +440,18 @@ struct StoryTrackerPanel: View {
             Button("Cancel", role: .cancel) { newTitle = "" }
         }
         .sheet(item: $editing) { story in
-            TrackedStorySheet(story: story) { store.updateTrackedStory($0) }
+            TrackedStorySheet(
+                story: story,
+                onSave: { store.updateTrackedStory($0) },
+                onResolve: { updated, note in
+                    store.updateTrackedStory(updated)
+                    store.resolveStory(updated.id, resolution: note)
+                },
+                onReopen: { updated in
+                    store.updateTrackedStory(updated)
+                    store.reopenStory(updated.id)
+                }
+            )
         }
         .confirmationDialog(
             "Stop tracking “\(pendingStop?.title ?? "")”?",
@@ -459,7 +498,8 @@ private struct TrackedStoryRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Text(story.lastUpdated.formatted(.relative(presentation: .named)))
+                Text(story.resolvedAt.map { "Resolved \($0.formatted(.dateTime.month(.abbreviated).day()))" }
+                     ?? story.lastUpdated.formatted(.relative(presentation: .named)))
                     .font(.system(size: Zoom.s(11)))
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -469,9 +509,13 @@ private struct TrackedStoryRow: View {
 }
 
 private struct TrackedStorySheet: View {
+    @Environment(\.dismiss) private var dismiss
     @State var story: TrackedStory
     @State private var pendingRemoval: StoryMention?
+    @State private var resolution = ""
     var onSave: (TrackedStory) -> Void
+    var onResolve: (TrackedStory, String) -> Void
+    var onReopen: (TrackedStory) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -519,6 +563,7 @@ private struct TrackedStorySheet: View {
             }
             .formStyle(.grouped)
             .frame(maxHeight: 520)
+            resolveRow
             SheetButtons(confirmTitle: "Save", canConfirm: true) { onSave(story) }
         }
         .frame(width: 500)
@@ -570,5 +615,66 @@ struct StatusPicker: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+    }
+}
+
+private extension TrackedStorySheet {
+    /// Resolve (with how it ended) or, for a resolved story, its resolution and Reopen.
+    @ViewBuilder
+    var resolveRow: some View {
+        if let resolvedAt = story.resolvedAt {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label("Resolved \(resolvedAt.formatted(date: .abbreviated, time: .omitted))\(story.resolution.map { ": \($0)" } ?? "")",
+                      systemImage: "checkmark.seal.fill")
+                    .font(.system(size: Zoom.s(12)))
+                    .foregroundStyle(Theme.positive)
+                Spacer()
+                Button("Reopen") {
+                    onReopen(story)
+                    dismiss()
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .help("Move it back to the active Story Tracker")
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 4)
+        } else {
+            HStack(spacing: 8) {
+                TextField("How it ended (optional)", text: $resolution, prompt: Text("e.g. Back in the lineup vs SKC"))
+                    .textFieldStyle(.roundedBorder)
+                Button("Resolve Story") {
+                    onResolve(story, resolution)
+                    dismiss()
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .help("Moves it to the Resolved list, keeping all its history")
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 4)
+        }
+    }
+}
+
+/// Header checkbox: selects every story in a section, or clears them if all are selected.
+struct SelectAllCheckbox: View {
+    @Environment(AppStore.self) private var store
+    var ids: [UUID]
+
+    var body: some View {
+        let selected = ids.filter { store.selectedStoryIDs.contains($0) }.count
+        Button {
+            store.toggleSelectAll(ids)
+        } label: {
+            HStack(spacing: 5) {
+                Checkbox(isOn: !ids.isEmpty && selected == ids.count, isMixed: selected > 0 && selected < ids.count)
+                Text("All")
+                    .font(.system(size: Zoom.s(11)))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(ids.isEmpty)
+        .help(selected == ids.count && !ids.isEmpty ? "Deselect all" : "Select all \(ids.count)")
     }
 }

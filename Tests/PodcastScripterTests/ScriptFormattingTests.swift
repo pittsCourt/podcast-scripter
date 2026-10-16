@@ -669,3 +669,56 @@ struct TrackedStoryStatusTests {
         #expect(story.status == nil && story.statusHistory.isEmpty)
     }
 }
+
+struct LayoutTests {
+    @Test func resetPutsEverythingBack() {
+        let defaults = UserDefaults.standard
+        let keys = [Layout.scriptsKey, Layout.queueKey, Layout.queueHeightKey, Layout.newsHeightKey, Layout.sidebarKey]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) } }
+
+        defaults.set(0.6, forKey: Layout.scriptsKey)
+        defaults.set(0.8, forKey: Layout.queueKey)
+        defaults.set(0.2, forKey: Layout.queueHeightKey)
+        defaults.set(0.9, forKey: Layout.newsHeightKey)
+        defaults.set(false, forKey: Layout.sidebarKey)
+        Layout.reset()
+
+        #expect(defaults.double(forKey: Layout.scriptsKey) == 0.22)
+        #expect(defaults.double(forKey: Layout.queueKey) == 0.5)
+        #expect(defaults.double(forKey: Layout.queueHeightKey) == 0.5)
+        #expect(defaults.double(forKey: Layout.newsHeightKey) == 0.5)
+        #expect(defaults.bool(forKey: Layout.sidebarKey))
+    }
+}
+
+@MainActor
+struct ResolveAndSelectAllTests {
+    @Test func resolvingMovesStoriesToHistoryAndBack() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        store.addTrackedStory(title: "Glad Injury")
+        let id = try #require(store.trackedStories.first { $0.title == "Glad Injury" }?.id)
+
+        store.resolveStory(id, resolution: "  Back in the lineup vs SKC ")
+        #expect(!store.filteredTrackedStories.contains { $0.id == id })
+        let resolved = try #require(store.resolvedStories.first { $0.id == id })
+        #expect(resolved.resolution == "Back in the lineup vs SKC")
+        #expect(store.aiStory(resolved).resolvedAt != nil) // Gemma still sees it, marked resolved
+
+        store.reopenStory(id)
+        #expect(store.filteredTrackedStories.contains { $0.id == id })
+        #expect(store.resolvedStories.isEmpty)
+    }
+
+    @Test func selectAllTogglesASection() {
+        let store = AppStore(service: FakeNotesService(), fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json"))
+        let a = UUID(), b = UUID(), other = UUID()
+        store.selectedStoryIDs = [a, other]
+        store.toggleSelectAll([a, b])          // some selected -> select all
+        #expect(store.selectedStoryIDs == [a, b, other])
+        store.toggleSelectAll([a, b])          // all selected -> clear just this section
+        #expect(store.selectedStoryIDs == [other])
+    }
+}
