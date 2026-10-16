@@ -86,12 +86,12 @@ private struct RankingChartCard: View {
                 footer
             } else if let only = source.latest {
                 Text("Tracking started \(only.day?.formatted(date: .abbreviated, time: .omitted) ?? only.date). The graph fills in as new rankings come out.")
-                    .font(.system(size: 11))
+                    .font(.system(size: Zoom.s(11)))
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(source.error ?? "No rankings yet.")
-                    .font(.system(size: 11))
+                    .font(.system(size: Zoom.s(11)))
                     .foregroundStyle(source.error == nil ? Theme.textTertiary : Theme.negative)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -104,21 +104,21 @@ private struct RankingChartCard: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(source.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: Zoom.s(13), weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Text(readout)
-                    .font(.system(size: 11))
+                    .font(.system(size: Zoom.s(11)))
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
             }
             Spacer()
             if let shown = hovered ?? source.latest {
                 Text(shown.rank.ordinal)
-                    .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                    .font(.system(size: Zoom.s(20), weight: .semibold).monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
                 if hovered == nil {
                     ChangeBadge(change: source.change)
-                        .font(.system(size: 11.5).monospacedDigit())
+                        .font(.system(size: Zoom.s(11.5)).monospacedDigit())
                 }
             }
         }
@@ -204,7 +204,7 @@ private struct RankingChartCard: View {
                     }
             }
         }
-        .font(.system(size: 10))
+        .font(.system(size: Zoom.s(10)))
         .foregroundStyle(Theme.textTertiary)
         .frame(height: 110)
     }
@@ -224,7 +224,7 @@ private struct RankingChartCard: View {
             Spacer()
             Text("\(ranks.count) rankings")
         }
-        .font(.system(size: 10.5).monospacedDigit())
+        .font(.system(size: Zoom.s(10.5)).monospacedDigit())
         .foregroundStyle(Theme.textTertiary)
     }
 }

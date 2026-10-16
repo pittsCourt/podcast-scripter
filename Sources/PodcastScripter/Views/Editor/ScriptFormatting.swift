@@ -166,14 +166,14 @@ enum ScriptStyle {
 
     // MARK: Loading & saving
 
-    static func load(_ project: Project) -> NSAttributedString {
-        if let data = project.richText,
+    static func load(_ script: Script) -> NSAttributedString {
+        if let data = script.richText,
            let stored = NSAttributedString(rtf: data, documentAttributes: nil) {
             let text = NSMutableAttributedString(attributedString: stored)
             normalize(text)
             return text
         }
-        return NSAttributedString(string: project.script, attributes: attributes(for: .body))
+        return NSAttributedString(string: script.plainText, attributes: attributes(for: .body))
     }
 
     static func rtfData(_ text: NSAttributedString) -> Data? {

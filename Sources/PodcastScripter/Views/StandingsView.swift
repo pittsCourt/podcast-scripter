@@ -36,7 +36,7 @@ struct StandingsView: View {
                     Spacer()
                     Text(standings.season)
                 }
-                .font(.system(size: 10.5))
+                .font(.system(size: Zoom.s(10.5)))
                 .foregroundStyle(Theme.textTertiary)
                 .padding(.horizontal, 16)
                 .frame(height: 30)
@@ -67,7 +67,7 @@ struct StandingsView: View {
             ForEach(["P", "W", "D", "L", "GD"], id: \.self) { Text($0).frame(width: StandingsRowView.statWidth) }
             Text("Pts").frame(width: StandingsRowView.pointsWidth)
         }
-        .font(.system(size: 10.5, weight: .semibold))
+        .font(.system(size: Zoom.s(10.5), weight: .semibold))
         .foregroundStyle(Theme.textTertiary)
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
@@ -117,7 +117,7 @@ private struct StandingsRowView: View {
                 .frame(width: Self.pointsWidth)
                 .foregroundStyle(Theme.textPrimary)
         }
-        .font(.system(size: 12).monospacedDigit())
+        .font(.system(size: Zoom.s(12)).monospacedDigit())
         .padding(.horizontal, 8)
         .frame(height: 28)
         .background(

@@ -36,6 +36,10 @@ In the **Shortcuts** app on the iPhone:
 
 Done. In X, tap **Share → Send to Riot Report**. You'll see "Added: Real Salt Lake (@realsaltlake)", and within a minute the post is in the Mac app's Story Queue. Click the refresh button in the queue's header to see it immediately.
 
+## Sending to a different project
+
+Shares go to your default project (the first one, e.g. RSL Riot Report). To make a Shortcut for another show, duplicate it and add `?project=<project id>` to the URL, for example `http://<address>:3030/api/items?project=sounders-sound-off`. The project ID is shown in Project Settings, or in the inbox page's address when that project is picked. The inbox page has its own project picker.
+
 ## Making it yours
 
 - **Position in the share menu:** in any share sheet, scroll the app/action row to the end → **Edit Actions** → add it to **Favorites** and drag it to the top.

@@ -3,27 +3,27 @@ import SwiftUI
 
 struct EditorView: View {
     @Environment(AppStore.self) private var store
-    var projectID: Project.ID
+    var scriptID: Script.ID
     /// Shared by the editor and the sidebar, which inserts stories into the script.
     @State private var controller = RichTextController()
 
     var body: some View {
-        if let project = store.project(projectID) {
+        if let script = store.script(scriptID) {
             HStack(spacing: 12) {
-                ScriptEditor(project: project, controller: controller)
-                StorySidebar(project: project, controller: controller)
-                    .frame(width: 340)
+                ScriptEditor(script: script, controller: controller)
+                StorySidebar(script: script, controller: controller)
+                    .frame(width: Zoom.s(340))
             }
             .padding(12)
         } else {
-            EmptyState(title: "Project not found", systemImage: "questionmark.folder")
+            EmptyState(title: "Script not found", systemImage: "questionmark.folder")
         }
     }
 }
 
 private struct ScriptEditor: View {
     @Environment(AppStore.self) private var store
-    var project: Project
+    var script: Script
     var controller: RichTextController
     @State private var editingDetails = false
     @State private var draftingBullets = false
@@ -33,11 +33,11 @@ private struct ScriptEditor: View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(project.name)
-                        .font(.system(size: 15, weight: .semibold))
+                    Text(script.name)
+                        .font(.system(size: Zoom.s(15), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
-                    Text(project.episodeDate.formatted(date: .complete, time: .omitted))
-                        .font(.system(size: 12))
+                    Text(script.episodeDate.formatted(date: .complete, time: .omitted))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(Theme.textSecondary)
                 }
                 Spacer()
@@ -47,7 +47,7 @@ private struct ScriptEditor: View {
                 .buttonStyle(SecondaryButtonStyle())
                 .help("Gemma drafts the intro's three top-story bullets")
                 IconButton(systemName: "pencil", help: "Edit details") { editingDetails = true }
-                IconButton(systemName: "arrow.down.doc", help: "Download script (⇧⌘S)") { ScriptExporter.export(project) }
+                IconButton(systemName: "arrow.down.doc", help: "Download script (⇧⌘S)") { ScriptExporter.export(script) }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
             .padding(.horizontal, 16)
@@ -61,27 +61,27 @@ private struct ScriptEditor: View {
             Divider().overlay(Theme.border)
 
             RichTextEditor(
-                documentID: project.id,
-                initialText: { ScriptStyle.load(project) },
+                documentID: script.id,
+                initialText: { ScriptStyle.load(script) },
                 controller: controller
             ) { text in
-                var updated = store.project(project.id) ?? project
-                updated.script = text.string
+                var updated = store.script(script.id) ?? script
+                updated.plainText = text.string
                 updated.richText = ScriptStyle.rtfData(text)
-                store.updateProject(updated, debounced: true)
+                store.updateScript(updated, debounced: true)
             }
-            .frame(maxWidth: 760)
+            .frame(maxWidth: Zoom.s(760))
             .padding(.horizontal, 32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider().overlay(Theme.border)
             HStack(spacing: 14) {
-                Label("\(project.wordCount.formatted()) words", systemImage: "text.alignleft")
-                Label(String(format: "~%.1f min", project.estimatedMinutes), systemImage: "clock")
+                Label("\(script.wordCount.formatted()) words", systemImage: "text.alignleft")
+                Label(String(format: "~%.1f min", script.estimatedMinutes), systemImage: "clock")
                 Spacer()
-                Text("Edited \(project.updatedAt.formatted(.relative(presentation: .named)))")
+                Text("Edited \(script.updatedAt.formatted(.relative(presentation: .named)))")
             }
-            .font(.system(size: 11.5))
+            .font(.system(size: Zoom.s(11.5)))
             .foregroundStyle(Theme.textTertiary)
             .padding(.horizontal, 16)
             .frame(height: 34)
@@ -89,18 +89,18 @@ private struct ScriptEditor: View {
         .card()
         .focusedSceneValue(\.richTextController, controller)
         .sheet(isPresented: $editingDetails) {
-            ProjectDetailsSheet(title: "Edit Project", project: project) { store.updateProject($0) }
+            ScriptDetailsSheet(title: "Edit Script", script: script) { store.updateScript($0) }
         }
         .sheet(isPresented: Binding(
             get: { controller.taggingExcerpt != nil },
             set: { if !$0 { controller.taggingExcerpt = nil } }
         )) {
             if let excerpt = controller.taggingExcerpt {
-                TrackStorySheet(excerpt: excerpt, projectID: project.id)
+                TrackStorySheet(excerpt: excerpt, scriptID: script.id)
             }
         }
         .sheet(isPresented: $draftingBullets) {
-            IntroBulletsSheet(projectID: project.id, controller: controller)
+            IntroBulletsSheet(scriptID: script.id, controller: controller)
         }
         .sheet(isPresented: $controller.isEditingLink) {
             LinkSheet(controller: controller)
@@ -108,10 +108,10 @@ private struct ScriptEditor: View {
     }
 }
 
-/// The stories picked for this project when it was created.
+/// The stories picked for this script when it was created.
 private struct StorySidebar: View {
     @Environment(AppStore.self) private var store
-    var project: Project
+    var script: Script
     var controller: RichTextController
     @State private var reading: StoryItem?
     @State private var selected: Set<UUID> = []
@@ -127,7 +127,7 @@ private struct StorySidebar: View {
         VStack(spacing: 0) {
             HStack {
                 Picker("Show", selection: $mode) {
-                    Text("Stories (\(project.notes.count))").tag(Mode.stories)
+                    Text("Stories (\(script.notes.count))").tag(Mode.stories)
                     Label("Briefing", systemImage: "sparkles").tag(Mode.briefing)
                 }
                 .pickerStyle(.segmented)
@@ -138,17 +138,17 @@ private struct StorySidebar: View {
             Divider().overlay(Theme.border)
 
             if mode == .briefing {
-                BriefingView(project: project)
-            } else if project.notes.isEmpty {
+                BriefingView(script: script)
+            } else if script.notes.isEmpty {
                 EmptyState(
                     title: "No stories attached",
                     systemImage: "tray",
-                    message: "Select stories on the home page and click New Project to bring them in."
+                    message: "Select stories on the home page and click New Script to bring them in."
                 )
             } else {
                 ScrollView {
                     LazyVStack(spacing: 4) {
-                        ForEach(project.notes) { story in
+                        ForEach(script.notes) { story in
                             StoryCard(
                                 story: story,
                                 controller: controller,
@@ -179,22 +179,22 @@ private struct StorySidebar: View {
                         let ids = selected
                         returning = true
                         Task {
-                            await store.returnToQueue(ids, from: project.id)
+                            await store.returnToQueue(ids, from: script.id)
                             selected.removeAll()
                             returning = false
                         }
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(selected.isEmpty || returning)
-                    .help("Remove from this project and put back in the Story Queue or news columns")
+                    .help("Remove from this script and put back in the Story Queue or news columns")
                 }
-                .font(.system(size: 12))
+                .font(.system(size: Zoom.s(12)))
                 .padding(.horizontal, 12)
                 .frame(height: 46)
             }
         }
         .card()
-        .onChange(of: project.notes.map(\.id)) { _, ids in
+        .onChange(of: script.notes.map(\.id)) { _, ids in
             selected.formIntersection(ids)
         }
         .sheet(item: $reading) { story in
@@ -217,26 +217,26 @@ private struct StoryCard: View {
     var body: some View {
         HoverRow(isSelected: isSelected) { _ in
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Button(action: onToggle) {
-                        Checkbox(isOn: isSelected)
-                    }
-                    .buttonStyle(.plain)
-                    .help(isSelected ? "Deselect" : "Select to return to the queue")
+                // The whole title row toggles selection (the body text stays selectable for copying).
+                HStack(alignment: .center, spacing: 8) {
+                    Checkbox(isOn: isSelected)
                     Text(story.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: Zoom.s(13), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: 4)
                     KindBadge(kind: story.kind)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onToggle)
+                .help(isSelected ? "Click to deselect" : "Click to select, then Return to Queue")
                 if !story.body.isEmpty {
                     Text(story.body)
-                        .font(.system(size: 12))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(Theme.textSecondary)
                         .textSelection(.enabled)
                 }
                 Text([story.source, story.createdAt.formatted(date: .abbreviated, time: .omitted)].compactMap { $0 }.joined(separator: "  ·  "))
-                    .font(.system(size: 11))
+                    .font(.system(size: Zoom.s(11)))
                     .foregroundStyle(Theme.textTertiary)
                 HStack(spacing: 6) {
                     primaryAction
@@ -290,7 +290,7 @@ private struct CardAction: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: Zoom.s(11), weight: .medium))
                 .foregroundStyle(isProminent ? Theme.accent : hovering ? Theme.textPrimary : Theme.textTertiary)
                 .padding(.horizontal, 7)
                 .frame(height: 22)
@@ -311,13 +311,13 @@ private struct CardAction: View {
 /// Per tracked story: what the show has said so far, and what's new in the queue and news.
 private struct BriefingView: View {
     @Environment(AppStore.self) private var store
-    var project: Project
+    var script: Script
     @State private var briefings: [StoryBriefing] = []
     @State private var loading = false
     @State private var error: String?
 
     var body: some View {
-        let stories = store.briefingStories(for: project.id)
+        let stories = store.briefingStories(for: script.id)
         VStack(spacing: 0) {
             if stories.isEmpty {
                 EmptyState(
@@ -328,13 +328,13 @@ private struct BriefingView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(store.trackedStories(in: project.id).isEmpty
+                        Text(store.trackedStories(in: script.id).isEmpty
                              ? "Your most recently updated stories. Tag passages in this episode to focus the briefing."
                              : "Stories tagged in this episode.")
-                            .font(.system(size: 11))
+                            .font(.system(size: Zoom.s(11)))
                             .foregroundStyle(Theme.textTertiary)
                         if let error {
-                            Text(error).font(.system(size: 12)).foregroundStyle(Theme.negative)
+                            Text(error).font(.system(size: Zoom.s(12))).foregroundStyle(Theme.negative)
                         }
                         ForEach(stories) { story in
                             BriefingCard(story: story, briefing: briefings.first { $0.storyId == story.id.uuidString })
@@ -347,7 +347,7 @@ private struct BriefingView: View {
                     if loading {
                         ProgressView().controlSize(.small)
                         Text("Gemma is reading back through the season…")
-                            .font(.system(size: 11.5))
+                            .font(.system(size: Zoom.s(11.5)))
                             .foregroundStyle(Theme.textTertiary)
                     }
                     Spacer()
@@ -365,7 +365,7 @@ private struct BriefingView: View {
         loading = true
         defer { loading = false }
         do {
-            briefings = try await store.briefing(for: project.id)
+            briefings = try await store.briefing(for: script.id)
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -381,21 +381,21 @@ private struct BriefingCard: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
                 Text(story.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: Zoom.s(13), weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Text("\(story.mentions.count) mentions")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: Zoom.s(10.5)))
                     .foregroundStyle(Theme.textTertiary)
             }
             if let briefing {
                 Text(briefing.summary)
-                    .font(.system(size: 12))
+                    .font(.system(size: Zoom.s(12)))
                     .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
                 if let whatsNew = briefing.whatsNew {
                     Label(whatsNew, systemImage: "sparkle")
-                        .font(.system(size: 12))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(Theme.textPrimary)
                         .padding(7)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -404,7 +404,7 @@ private struct BriefingCard: View {
                 }
             } else {
                 Text(story.latestUpdate.isEmpty ? "No updates yet." : "Latest: \(story.latestUpdate)")
-                    .font(.system(size: 12))
+                    .font(.system(size: Zoom.s(12)))
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(2)
             }
@@ -418,7 +418,7 @@ private struct BriefingCard: View {
 private struct IntroBulletsSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    var projectID: Project.ID
+    var scriptID: Script.ID
     var controller: RichTextController
     @State private var bullets: [String] = []
     @State private var loading = false
@@ -427,10 +427,10 @@ private struct IntroBulletsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Label("Draft Intro Bullets", systemImage: "sparkles")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: Zoom.s(15), weight: .semibold))
                 .padding([.horizontal, .top], 20)
             Text("Three short, punchy top stories ranked by importance; the latest match result normally leads. Edit before inserting.")
-                .font(.system(size: 12))
+                .font(.system(size: Zoom.s(12)))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 20)
                 .padding(.top, 6)
@@ -478,7 +478,7 @@ private struct IntroBulletsSheet: View {
         loading = true
         defer { loading = false }
         do {
-            bullets = try await store.introBullets(for: projectID)
+            bullets = try await store.introBullets(for: scriptID)
             error = nil
         } catch {
             self.error = error.localizedDescription

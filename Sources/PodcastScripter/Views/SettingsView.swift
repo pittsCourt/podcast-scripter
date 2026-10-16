@@ -51,7 +51,7 @@ struct SettingsView: View {
             .padding(12)
         }
         .frame(width: 680, height: 620)
-        .task {
+        .task(id: store.currentProjectID) {
             await store.loadConfig()
             draft = store.config
             loaded = true
@@ -101,21 +101,62 @@ struct SettingsView: View {
 // MARK: - Show
 
 private struct ShowSettings: View {
+    @Environment(AppStore.self) private var store
     @Binding var draft: AppConfig
+    @State private var projectName = ""
+    @State private var confirmingDelete = false
+    @State private var projectError: String?
 
     var body: some View {
         Form {
+            Section {
+                HStack {
+                    TextField("Project name", text: $projectName)
+                    Button("Rename") {
+                        Task {
+                            do { try await store.renameCurrentProject(to: projectName) } catch { projectError = error.localizedDescription }
+                        }
+                    }
+                    .disabled(projectName.trimmingCharacters(in: .whitespaces).isEmpty || projectName == store.currentProjectName)
+                }
+                if let projectError { Text(projectError).foregroundStyle(Theme.negative) }
+            } header: {
+                Text("Project")
+            } footer: {
+                Text("Settings on every tab apply to this project only. Switch projects from the name in the toolbar.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 TextField("Show name", text: $draft.show.name, prompt: Text("Riot Report"))
                 TextField("Full show name", text: $draft.show.fullName, prompt: Text("RSL Riot Report"))
                 TextField("Host", text: $draft.show.host)
                 TextField("X handle", text: $draft.show.xHandle, prompt: Text("@yourshow"))
             } footer: {
-                Text("The full name, host and handle fill in {show}, {host} and {handle} in the script template. New projects are named after the full show name.")
+                Text("The full name, host and handle fill in {show}, {host} and {handle} in the script template. New scripts are named after the full show name.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Delete This Project…", role: .destructive) { confirmingDelete = true }
+                    .disabled(store.projectData.count < 2)
+            } footer: {
+                Text(store.projectData.count < 2 ? "This is your only project." : "Removes this project and everything in it.")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .onAppear { projectName = store.currentProjectName }
+        .onChange(of: store.currentProjectID) { projectName = store.currentProjectName }
+        .confirmationDialog("Delete “\(store.currentProjectName)”?", isPresented: $confirmingDelete) {
+            Button("Delete Project", role: .destructive) {
+                Task {
+                    do { try await store.deleteCurrentProject() } catch { projectError = error.localizedDescription }
+                }
+            }
+        } message: {
+            Text("Its \(store.scripts.count) scripts, Story Queue, Story Tracker, news, saved power rankings and settings will be permanently deleted and no longer stored, on this Mac and in the notes service. This can’t be undone.")
+        }
     }
 }
 
@@ -161,7 +202,7 @@ private struct TemplateSettings: View {
                     }
                     Section {
                         TextEditor(text: $draft.template.sections[index].body)
-                            .font(.system(size: 13))
+                            .font(.system(size: Zoom.s(13)))
                             .frame(minHeight: 150)
                     } header: {
                         Text("Starting text")
@@ -169,7 +210,7 @@ private struct TemplateSettings: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Lines starting with “• ” become indented bullets. Leave empty for a blank line to write in.")
                             ForEach(ScriptTemplate.placeholders, id: \.token) { item in
-                                Text("\(item.token)  \(item.meaning)").font(.system(size: 11).monospaced())
+                                Text("\(item.token)  \(item.meaning)").font(.system(size: Zoom.s(11)).monospaced())
                             }
                         }
                         .foregroundStyle(.secondary)

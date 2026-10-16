@@ -74,6 +74,10 @@ function toItem(row) {
   };
 }
 
+// Every query is limited to the current project (see projects.js). Required lazily because
+// projects.js itself uses this file's connection.
+const pid = () => require('./projects').current();
+
 function insertItem(item) {
   const now = new Date().toISOString();
   const row = {
@@ -81,11 +85,12 @@ function insertItem(item) {
     createdAt: item.createdAt || now,
   };
   db.prepare(`
-    INSERT INTO items (id, kind, status, title, body, url, source, author_name, handle, image_url,
+    INSERT INTO items (id, project_id, kind, status, title, body, url, source, author_name, handle, image_url,
                        media_links, category, feed_id, posted_on, published_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     row.id,
+    pid(),
     item.kind,
     item.status || 'inbox',
     item.title,
@@ -107,49 +112,49 @@ function insertItem(item) {
 }
 
 function getItem(id) {
-  return toItem(db.prepare('SELECT * FROM items WHERE id = ?').get(id));
+  return toItem(db.prepare('SELECT * FROM items WHERE id = ? AND project_id = ?').get(id, pid()));
 }
 
 /** Finds an existing inbox item (not news) with this URL, for de-duplication. */
 function findInboxItemByUrl(url) {
-  return toItem(db.prepare(`SELECT * FROM items WHERE url = ? AND kind != 'news'`).get(url));
+  return toItem(db.prepare(`SELECT * FROM items WHERE url = ? AND kind != 'news' AND project_id = ?`).get(url, pid()));
 }
 
 /** True if this news story is already stored -- same link, or the same headline syndicated elsewhere. */
 function newsExists(url, title) {
-  return !!db.prepare(`SELECT 1 FROM items WHERE kind = 'news' AND (url = ? OR lower(title) = lower(?))`).get(url, title);
+  return !!db.prepare(`SELECT 1 FROM items WHERE kind = 'news' AND project_id = ? AND (url = ? OR lower(title) = lower(?))`).get(pid(), url, title);
 }
 
 function listInbox({ status = 'inbox' } = {}) {
   const rows = status === 'all'
-    ? db.prepare(`SELECT * FROM items WHERE kind != 'news' ORDER BY created_at DESC`).all()
-    : db.prepare(`SELECT * FROM items WHERE kind != 'news' AND status = ? ORDER BY created_at DESC`).all(status);
+    ? db.prepare(`SELECT * FROM items WHERE kind != 'news' AND project_id = ? ORDER BY created_at DESC`).all(pid())
+    : db.prepare(`SELECT * FROM items WHERE kind != 'news' AND project_id = ? AND status = ? ORDER BY created_at DESC`).all(pid(), status);
   return rows.map(toItem);
 }
 
 function listNews({ category, limit = 20 } = {}) {
-  // Used (put in a project) and dismissed news stays stored, so feeds don't re-add it, but isn't listed.
+  // Used (put in a script) and dismissed news stays stored, so feeds don't re-add it, but isn't listed.
   const order = 'ORDER BY COALESCE(published_at, created_at) DESC LIMIT ?';
   const rows = category
-    ? db.prepare(`SELECT * FROM items WHERE kind = 'news' AND status = 'inbox' AND category = ? ${order}`).all(category, limit)
-    : db.prepare(`SELECT * FROM items WHERE kind = 'news' AND status = 'inbox' ${order}`).all(limit);
+    ? db.prepare(`SELECT * FROM items WHERE kind = 'news' AND project_id = ? AND status = 'inbox' AND category = ? ${order}`).all(pid(), category, limit)
+    : db.prepare(`SELECT * FROM items WHERE kind = 'news' AND project_id = ? AND status = 'inbox' ${order}`).all(pid(), limit);
   return rows.map(toItem);
 }
 
 function updateStatus(id, status) {
-  const result = db.prepare('UPDATE items SET status = ?, updated_at = ? WHERE id = ?')
-    .run(status, new Date().toISOString(), id);
+  const result = db.prepare('UPDATE items SET status = ?, updated_at = ? WHERE id = ? AND project_id = ?')
+    .run(status, new Date().toISOString(), id, pid());
   return result.changes > 0 ? getItem(id) : null;
 }
 
 function deleteItem(id) {
-  return db.prepare('DELETE FROM items WHERE id = ?').run(id).changes > 0;
+  return db.prepare('DELETE FROM items WHERE id = ? AND project_id = ?').run(id, pid()).changes > 0;
 }
 
 /** Drops news older than `days` so the table doesn't grow forever. */
 function pruneNews(days) {
   const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-  db.prepare(`DELETE FROM items WHERE kind = 'news' AND COALESCE(published_at, created_at) < ?`).run(cutoff);
+  db.prepare(`DELETE FROM items WHERE kind = 'news' AND project_id = ? AND COALESCE(published_at, created_at) < ?`).run(pid(), cutoff);
 }
 
 // --- feeds ---
@@ -166,17 +171,17 @@ function toFeed(row) {
 }
 
 function listFeeds() {
-  return db.prepare('SELECT * FROM feeds ORDER BY category, title').all().map(toFeed);
+  return db.prepare('SELECT * FROM feeds WHERE project_id = ? ORDER BY category, title').all(pid()).map(toFeed);
 }
 
 function addFeed({ url, title, category }) {
   const id = crypto.randomUUID();
-  db.prepare('INSERT INTO feeds (id, url, title, category) VALUES (?, ?, ?, ?)').run(id, url, title, category);
+  db.prepare('INSERT INTO feeds (id, project_id, url, title, category) VALUES (?, ?, ?, ?, ?)').run(id, pid(), url, title, category);
   return toFeed(db.prepare('SELECT * FROM feeds WHERE id = ?').get(id));
 }
 
 function deleteFeed(id) {
-  return db.prepare('DELETE FROM feeds WHERE id = ?').run(id).changes > 0;
+  return db.prepare('DELETE FROM feeds WHERE id = ? AND project_id = ?').run(id, pid()).changes > 0;
 }
 
 function markFeedFetched(id, error) {
@@ -185,15 +190,24 @@ function markFeedFetched(id, error) {
 }
 
 function feedCount() {
-  return db.prepare('SELECT COUNT(*) AS n FROM feeds').get().n;
+  return db.prepare('SELECT COUNT(*) AS n FROM feeds WHERE project_id = ?').get(pid()).n;
 }
 
 function itemCount() {
-  return db.prepare('SELECT COUNT(*) AS n FROM items').get().n;
+  return db.prepare('SELECT COUNT(*) AS n FROM items WHERE project_id = ?').get(pid()).n;
+}
+
+/** Everything stored for a project (used when a project is deleted). */
+function deleteProjectData(projectId) {
+  db.prepare('DELETE FROM items WHERE project_id = ?').run(projectId);
+  db.prepare('DELETE FROM feeds WHERE project_id = ?').run(projectId);
+  db.prepare('DELETE FROM ranking_snapshots WHERE project_id = ?').run(projectId);
+  db.prepare("DELETE FROM meta WHERE key LIKE ?").run(`%:${projectId}`);
 }
 
 module.exports = {
   connection: db,
+  deleteProjectData,
   DATA_DIR,
   INBOX_KINDS,
   STATUSES,

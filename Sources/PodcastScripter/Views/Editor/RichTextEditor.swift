@@ -317,6 +317,9 @@ struct RichTextEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        // App zoom (⌘+ / ⌘−) magnifies the page; the saved font sizes stay the same.
+        scrollView.allowsMagnification = true
+        scrollView.magnification = Zoom.factor
 
         let textView = scrollView.documentView as! NSTextView
         textView.isRichText = true

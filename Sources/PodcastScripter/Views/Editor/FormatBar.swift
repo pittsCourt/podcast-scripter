@@ -20,7 +20,7 @@ struct FormatBar: View {
                 }
             } label: {
                 Text(controller.block.label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: Zoom.s(12), weight: .medium))
                     .frame(width: 78, alignment: .leading)
             }
             .menuStyle(.borderlessButton)
@@ -56,7 +56,7 @@ struct FormatBar: View {
 
             Button(action: controller.beginTagging) {
                 Label("Track Story", systemImage: "binoculars")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: Zoom.s(12), weight: .medium))
                     .foregroundStyle(controller.hasSelection ? Theme.textPrimary : Theme.textTertiary)
                     .padding(.horizontal, 8)
                     .frame(height: 26)
@@ -83,7 +83,7 @@ private struct FormatButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: Zoom.s(12), weight: .medium))
                 .foregroundStyle(isOn ? Theme.accent : hovering ? Theme.textPrimary : Theme.textSecondary)
                 .frame(width: 28, height: 26)
                 .background(
@@ -107,7 +107,7 @@ struct LinkSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(controller.linkURL == nil ? "Add Link" : "Edit Link")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: Zoom.s(15), weight: .semibold))
                 .padding([.horizontal, .top], 20)
             Form {
                 TextField("Address", text: $address, prompt: Text("https://"))

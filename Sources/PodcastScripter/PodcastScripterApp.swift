@@ -5,16 +5,18 @@ import SwiftUI
 struct PodcastScripterApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var store = AppStore()
+    @AppStorage(Zoom.key) private var zoom = 1.0
 
     var body: some Scene {
         WindowGroup("Podcast Scripter") {
-            ContentView()
+            ZoomedContent(zoom: zoom)
                 .environment(store)
                 .frame(minWidth: 1240, minHeight: 680)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
                 .task {
                     // The sidebar syncs once on open; the queue keeps checking for phone shares.
+                    await store.refreshProjects()
                     await store.loadConfig()
                     async let sidebar: Void = store.syncSidebar(force: false)
                     async let rankings: Void = store.syncRankings()
@@ -30,7 +32,11 @@ struct PodcastScripterApp: App {
         }
         .defaultSize(width: 1500, height: 920)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .commands { FormatCommands() }
+        .commands {
+            FormatCommands()
+            ZoomCommands()
+        }
+
 
         Settings {
             SettingsView()
@@ -53,6 +59,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Applies the zoom before the window's views are built, and rebuilds them when it changes.
+private struct ZoomedContent: View {
+    var zoom: Double
+
+    init(zoom: Double) {
+        self.zoom = zoom
+        Zoom.factor = CGFloat(zoom)
+    }
+
+    var body: some View {
+        ContentView().id(zoom)
+    }
+}
+
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @AppStorage("showInfoSidebar") private var showSidebar = true
@@ -64,14 +84,14 @@ struct ContentView: View {
                 case .home:
                     HomeView()
                 case .editor(let id):
-                    EditorView(projectID: id)
+                    EditorView(scriptID: id)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if showSidebar {
                 InfoSidebar()
-                    .frame(width: 340)
+                    .frame(width: Zoom.s(340))
                     .padding([.vertical, .trailing], 12)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -86,11 +106,14 @@ struct ContentView: View {
                     Button {
                         store.route = .home
                     } label: {
-                        Label("Projects", systemImage: "chevron.left")
+                        Label("Scripts", systemImage: "chevron.left")
                     }
-                    .help("Back to projects (⌘[)")
+                    .help("Back to scripts (⌘[)")
                     .keyboardShortcut("[", modifiers: .command)
                 }
+            }
+            ToolbarItem(placement: .navigation) {
+                ProjectMenu()
             }
             ToolbarItem(placement: .principal) {
                 RankingsBanner()
@@ -121,15 +144,15 @@ struct ContentView: View {
     }
 
     private var title: String {
-        if case .editor(let id) = store.route, let project = store.project(id) {
-            return project.name
+        if case .editor(let id) = store.route, let script = store.script(id) {
+            return script.name
         }
         return store.config.show.name
     }
 
     private var subtitle: String {
-        if case .editor(let id) = store.route, let project = store.project(id) {
-            return project.episodeDate.formatted(date: .long, time: .omitted)
+        if case .editor(let id) = store.route, let script = store.script(id) {
+            return script.episodeDate.formatted(date: .long, time: .omitted)
         }
         return ""
     }

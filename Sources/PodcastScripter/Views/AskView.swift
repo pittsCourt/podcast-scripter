@@ -32,7 +32,7 @@ struct AskView: View {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.small)
                                 Text("Gemma is reading your show…")
-                                    .font(.system(size: 11.5))
+                                    .font(.system(size: Zoom.s(11.5)))
                                     .foregroundStyle(Theme.textTertiary)
                             }
                             .id("thinking")
@@ -52,7 +52,7 @@ struct AskView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Ask about your show…", text: $question, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.system(size: Zoom.s(13)))
                     .lineLimit(1...5)
                     .focused($focused)
                     .onSubmit(send)
@@ -69,7 +69,7 @@ struct AskView: View {
                     Spacer()
                     Button("Clear conversation") { store.chat.removeAll() }
                         .buttonStyle(.plain)
-                        .font(.system(size: 11))
+                        .font(.system(size: Zoom.s(11)))
                         .foregroundStyle(Theme.textTertiary)
                 }
                 .padding([.horizontal, .bottom], 10)
@@ -80,10 +80,10 @@ struct AskView: View {
     private var intro: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Ask Gemma", systemImage: "sparkles")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: Zoom.s(13), weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
             Text("Gemma can see your scripts, Story Tracker, queue, news, the table, matches and power rankings.")
-                .font(.system(size: 12))
+                .font(.system(size: Zoom.s(12)))
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(suggestions, id: \.self) { suggestion in
@@ -92,7 +92,7 @@ struct AskView: View {
                     send()
                 } label: {
                     Text(suggestion)
-                        .font(.system(size: 12))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(Theme.textPrimary)
                         .multilineTextAlignment(.leading)
                         .padding(.horizontal, 10)
@@ -121,7 +121,7 @@ private struct MessageBubble: View {
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 3) {
             Text(markdown)
-                .font(.system(size: 12.5))
+                .font(.system(size: Zoom.s(12.5)))
                 .foregroundStyle(isError ? Theme.negative : Theme.textPrimary)
                 .textSelection(.enabled)
                 .padding(.horizontal, 10)
@@ -132,8 +132,11 @@ private struct MessageBubble: View {
                 )
             if let detail = message.detail, !isError {
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(.system(size: Zoom.s(10)))
                     .foregroundStyle(Theme.textTertiary)
+            }
+            if let sources = message.sources {
+                SourcesView(sources: sources)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
@@ -143,5 +146,101 @@ private struct MessageBubble: View {
     private var markdown: AttributedString {
         (try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(message.content)
+    }
+}
+
+/// Everything Gemma was given for an answer, so any claim can be checked. Passages open their script.
+private struct SourcesView: View {
+    @Environment(AppStore.self) private var store
+    var sources: AskSources
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                Label(summary, systemImage: expanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: Zoom.s(10.5), weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("What Gemma was given to answer this")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    group("Script passages") {
+                        if sources.excerpts.isEmpty {
+                            note(sources.episodes == 0 ? "No scripts yet." : "No passages matched this question, out of \(sources.episodes) scripts.")
+                        }
+                        ForEach(sources.excerpts, id: \.self) { excerpt in
+                            Button {
+                                store.openScript(named: excerpt.episode, on: excerpt.date)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(excerpt.episode) · \(shortDate(excerpt.date))")
+                                        .font(.system(size: Zoom.s(10.5), weight: .semibold))
+                                        .foregroundStyle(Theme.accent)
+                                    Text("“\(excerpt.text)”")
+                                        .font(.system(size: Zoom.s(11)))
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(4)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open \(excerpt.episode)")
+                        }
+                    }
+                    group("Story Tracker") {
+                        if sources.stories.isEmpty { note("No tracked stories.") }
+                        ForEach(sources.stories, id: \.self) { story in
+                            line(story.title, "\(story.mentions) \(story.mentions == 1 ? "mention" : "mentions")")
+                        }
+                        if sources.storiesShortened { note("Shortened to fit the size limit in Settings → AI.") }
+                    }
+                    group("Other app data") {
+                        ForEach(sources.data, id: \.self) { section in line(section.label, section.detail) }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border))
+            }
+        }
+    }
+
+    private var summary: String {
+        let passages = sources.excerpts.count
+        return "Sources: \(passages) script \(passages == 1 ? "passage" : "passages"), \(sources.stories.count) tracked \(sources.stories.count == 1 ? "story" : "stories"), \(sources.data.count) data sections"
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            GroupLabel(text: title)
+            content()
+        }
+    }
+
+    private func line(_ label: String, _ detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 6)
+            Text(detail).foregroundStyle(Theme.textTertiary)
+        }
+        .font(.system(size: Zoom.s(11)))
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: Zoom.s(11)))
+            .foregroundStyle(Theme.textTertiary)
+    }
+
+    private func shortDate(_ iso: String) -> String {
+        ISO8601.parse("\(iso)T12:00:00Z")?.formatted(.dateTime.month(.abbreviated).day().year()) ?? iso
     }
 }

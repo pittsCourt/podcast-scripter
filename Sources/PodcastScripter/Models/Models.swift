@@ -1,15 +1,15 @@
 import Foundation
 
 /// A podcast episode being written.
-struct Project: Identifiable, Codable, Hashable {
+struct Script: Identifiable, Codable, Hashable {
     var id = UUID()
     var name: String
     var episodeDate: Date
     /// Plain-text copy of the script, used for word counts, search and plain-text export.
-    var script: String = ""
+    var plainText: String = ""
     /// The formatted script (RTF). Nil for scripts written before formatting existed.
     var richText: Data?
-    /// Story-queue items the project was created from.
+    /// Story-queue items the script was created from.
     var notes: [StoryItem] = []
     var createdAt = Date()
     var updatedAt = Date()
@@ -19,12 +19,18 @@ struct Project: Identifiable, Codable, Hashable {
     }
 
     var wordCount: Int {
-        script.split { $0.isWhitespace || $0.isNewline }.count
+        plainText.split { $0.isWhitespace || $0.isNewline }.count
     }
 
     /// Estimated spoken length at ~150 words per minute.
     var estimatedMinutes: Double {
         Double(wordCount) / 150.0
+    }
+
+    // Saved field names predate the rename (the text was called "script").
+    private enum CodingKeys: String, CodingKey {
+        case id, name, episodeDate, richText, notes, createdAt, updatedAt
+        case plainText = "script"
     }
 }
 
@@ -95,14 +101,21 @@ struct TrackedStory: Identifiable, Codable, Hashable {
 /// A passage from a script tagged as part of a tracked story.
 struct StoryMention: Identifiable, Codable, Hashable {
     var id = UUID()
-    var projectID: Project.ID
-    /// Copied so the history still reads well if the project is renamed or deleted.
-    var projectName: String
+    var scriptID: Script.ID
+    /// Copied so the history still reads well if the script is renamed or deleted.
+    var scriptName: String
     var episodeDate: Date
     var excerpt: String
     /// Optional takeaway, e.g. "Expected back after the international break".
     var note: String?
     var taggedAt = Date()
+
+    // Saved under the names used before scripts were called scripts.
+    private enum CodingKeys: String, CodingKey {
+        case id, episodeDate, excerpt, note, taggedAt
+        case scriptID = "projectID"
+        case scriptName = "projectName"
+    }
 }
 
 /// Power rankings from the notes service's /api/rankings: one entry per source, with season history.
@@ -243,7 +256,7 @@ struct NewsItem: Identifiable, Hashable, Sendable {
     var publishedAt: Date
     var url: URL?
 
-    /// How a news story is kept once it's added to a project.
+    /// How a news story is kept once it's added to a script.
     var asStoryItem: StoryItem {
         StoryItem(id: id, kind: .news, title: headline, body: summary, source: source, url: url, createdAt: publishedAt)
     }

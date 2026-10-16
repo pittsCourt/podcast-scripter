@@ -46,6 +46,11 @@ protocol NotesService: Sendable {
     func resetConfig() async throws -> AppConfig
     /// Teams in an ESPN league, for the team picker.
     func fetchTeams(league: String) async throws -> [TeamOption]
+    // Projects (one show and team each). These ignore the client's current project.
+    func listProjects() async throws -> [ProjectInfo]
+    func createProject(_ request: NewProjectRequest) async throws -> ProjectInfo
+    func updateProject(id: String, name: String?, makeDefault: Bool) async throws -> ProjectInfo
+    func deleteProject(id: String) async throws
     func aiStatus() async throws -> AIStatus
     /// Sends a one-line prompt to the configured model.
     func testAI() async throws -> AIReply
@@ -54,6 +59,46 @@ protocol NotesService: Sendable {
     func suggestStory(excerpt: String, episode: AIEpisode, stories: [AIStory]) async throws -> StorySuggestion
     func briefing(episode: AIEpisode, stories: [AIStory]) async throws -> [StoryBriefing]
     func introBullets(episode: AIEpisode) async throws -> [String]
+}
+
+// MARK: - Projects
+
+struct ProjectInfo: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var name: String
+    var isDefault: Bool
+    var showName: String?
+    var team: Team?
+
+    struct Team: Decodable, Equatable, Sendable {
+        var name: String
+        var shortName: String?
+        var espnSport: String?
+        var espnLeague: String?
+    }
+}
+
+struct NewProjectRequest: Encodable, Sendable {
+    var name: String
+    /// Copy settings (template, sources, competitions) from this project; nil = the defaults.
+    var fromProject: String?
+    var team: Team
+    var show: Show
+
+    struct Team: Encodable, Sendable {
+        var name: String
+        var shortName: String
+        var espnTeamId: String
+        var espnLeague: String
+        var espnSport: String
+    }
+
+    struct Show: Encodable, Sendable {
+        var name: String
+        var fullName: String
+        var host: String
+        var xHandle: String
+    }
 }
 
 // MARK: - Gemma payloads
@@ -65,17 +110,19 @@ struct ChatMessage: Codable, Equatable, Sendable, Identifiable {
     var content: String
     /// For assistant replies: model and seconds, e.g. "gemma-4-26b-a4b-it · 3.2s".
     var detail: String?
+    /// For assistant replies: exactly what Gemma was given. Not sent back with later questions.
+    var sources: AskSources?
 
     private enum CodingKeys: String, CodingKey { case role, content }
 }
 
 /// What only the app has: every episode's script and the Story Tracker.
 struct AIAppContext: Encodable, Sendable {
-    var projects: [AIProject]
+    var scripts: [AIScript]
     var trackedStories: [AIStory]
 }
 
-struct AIProject: Encodable, Sendable {
+struct AIScript: Encodable, Sendable {
     var name: String
     var date: String
     var script: String
@@ -112,6 +159,39 @@ struct AskReply: Decodable, Sendable {
     var answer: String
     var model: String
     var ms: Int
+    var sources: AskSources?
+}
+
+/// What the notes service gave Gemma for one question.
+struct AskSources: Codable, Equatable, Sendable {
+    /// Script passages, labeled with their episode.
+    var excerpts: [Excerpt]
+    /// Scripts available to pick from.
+    var episodes: Int
+    var stories: [Story]
+    /// True if the Story Tracker was too long and got cut short.
+    var storiesShortened: Bool
+    /// Other app data sections, e.g. "Results · 33 matches".
+    var data: [Section]
+
+    struct Excerpt: Codable, Equatable, Sendable, Hashable {
+        var episode: String
+        /// YYYY-MM-DD
+        var date: String
+        var text: String
+    }
+
+    struct Story: Codable, Equatable, Sendable, Hashable {
+        var title: String
+        var mentions: Int
+    }
+
+    struct Section: Codable, Equatable, Sendable, Hashable {
+        var label: String
+        var detail: String
+    }
+
+    var count: Int { excerpts.count + stories.count + data.count }
 }
 
 struct StorySuggestion: Decodable, Equatable, Sendable {
@@ -161,6 +241,13 @@ enum NotesServiceError: LocalizedError {
 struct NotesServiceClient: NotesService {
     var baseURL: URL
     var token: String
+    /// Sent as X-Project so the service acts on this project; empty = the service's default.
+    var projectID = ""
+
+    init(baseURL: URL, token: String) {
+        self.baseURL = baseURL
+        self.token = token
+    }
 
     func fetchInbox() async throws -> [StoryItem] {
         let items: [ServiceItem] = try await send("api/items")
@@ -219,6 +306,24 @@ struct NotesServiceClient: NotesService {
 
     func fetchTeams(league: String) async throws -> [TeamOption] {
         try await send("api/espn/teams", query: [URLQueryItem(name: "league", value: league)])
+    }
+
+    func listProjects() async throws -> [ProjectInfo] {
+        try await send("api/projects")
+    }
+
+    func createProject(_ request: NewProjectRequest) async throws -> ProjectInfo {
+        try await send("api/projects", method: "POST", json: request, timeout: 60)
+    }
+
+    private struct ProjectPatch: Encodable { var name: String?; var makeDefault: Bool }
+
+    func updateProject(id: String, name: String?, makeDefault: Bool) async throws -> ProjectInfo {
+        try await send("api/projects/\(id)", method: "PATCH", json: ProjectPatch(name: name, makeDefault: makeDefault))
+    }
+
+    func deleteProject(id: String) async throws {
+        try await sendEmpty("api/projects/\(id)", method: "DELETE")
     }
 
     func aiStatus() async throws -> AIStatus {
@@ -293,6 +398,9 @@ struct NotesServiceClient: NotesService {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if !projectID.isEmpty {
+            request.setValue(projectID, forHTTPHeaderField: "X-Project")
         }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

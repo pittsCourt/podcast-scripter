@@ -10,9 +10,12 @@ const BASE = 'https://site.api.espn.com/apis';
 const TTL_MS = Number(process.env.STANDINGS_TTL_MINUTES || 30) * 60000;
 const FETCH_TIMEOUT_MS = 15000;
 
-const caches = new Map(); // key -> { data, fetchedAt }
-// A different team or league makes cached results meaningless.
-config.onChange(() => caches.clear());
+const caches = new Map(); // "<project>:<key>" -> { data, fetchedAt }
+const projectId = () => require('./projects').current();
+// A different team or league makes that project's cached results meaningless.
+config.onChange((cfg, pid) => {
+  for (const key of caches.keys()) if (key.startsWith(`${pid}:`)) caches.delete(key);
+});
 
 const team = () => config.get().team;
 const teamId = () => String(team().espnTeamId);
@@ -27,7 +30,8 @@ async function espn(path) {
   return res.json();
 }
 
-async function cached(key, refresh, load) {
+async function cached(name, refresh, load) {
+  const key = `${projectId()}:${name}`;
   const hit = caches.get(key);
   if (hit && !refresh && Date.now() - hit.fetchedAt < TTL_MS) return { ...hit.data, stale: false };
   try {

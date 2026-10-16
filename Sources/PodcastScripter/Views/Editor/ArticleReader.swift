@@ -23,11 +23,11 @@ struct ArticleReaderSheet: View {
                     .disabled(!page.canGoBack)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(page.title.isEmpty ? story.title : page.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: Zoom.s(13), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
                     Text(page.url?.host() ?? story.source ?? "")
-                        .font(.system(size: 11))
+                        .font(.system(size: Zoom.s(11)))
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
@@ -55,7 +55,7 @@ struct ArticleReaderSheet: View {
 
             Divider().overlay(Theme.border)
             Text(statusText)
-                .font(.system(size: 11.5))
+                .font(.system(size: Zoom.s(11.5)))
                 .foregroundStyle(status == .noSelection ? Theme.negative : Theme.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)

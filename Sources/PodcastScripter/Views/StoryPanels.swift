@@ -92,16 +92,17 @@ struct NewsPanel: View {
     }
 }
 
-/// Count, Clear, Delete and New Project for everything selected across the queue and news columns.
+/// Count, Clear, Delete and New Script for everything selected across the queue and news columns.
 struct SelectionBar: View {
     @Environment(AppStore.self) private var store
-    @State private var choosingProject = false
+    @State private var choosingScript = false
+    @State private var confirmingDelete = false
 
     var body: some View {
         let count = store.selectedStoryIDs.count
         HStack(spacing: 8) {
             if count == 0 {
-                Text("Select stories from the queue or news to add to a project")
+                Text("Select stories from the queue or news to add to a script")
                     .foregroundStyle(Theme.textTertiary)
             } else {
                 Text("\(count) \(count == 1 ? "story" : "stories") selected")
@@ -112,58 +113,66 @@ struct SelectionBar: View {
             }
             Spacer()
             Group {
-                Button("Delete") { Task { await store.deleteSelected() } }
+                Button("Delete") { confirmingDelete = true }
                     .buttonStyle(SecondaryButtonStyle())
                     .help("Remove from the queue and news (it stays in the inbox page's history)")
-                Button("Add to Project…") { choosingProject = true }
+                    .confirmationDialog(
+                        "Remove \(count) \(count == 1 ? "story" : "stories")?",
+                        isPresented: $confirmingDelete
+                    ) {
+                        Button("Remove", role: .destructive) { Task { await store.deleteSelected() } }
+                    } message: {
+                        Text("They’ll be removed from the Story Queue and news columns and won’t come back. They’re still kept in the inbox page’s history (localhost:3030), where you can restore them or delete them permanently.")
+                    }
+                Button("Add to Script…") { choosingScript = true }
                     .buttonStyle(SecondaryButtonStyle())
-                    .disabled(store.projects.isEmpty)
-                    .help("Add the selected stories to an existing project")
-                    .popover(isPresented: $choosingProject, arrowEdge: .top) {
-                        ProjectPicker { id in
-                            choosingProject = false
-                            Task { await store.addSelected(toProject: id) }
+                    .disabled(store.scripts.isEmpty)
+                    .help("Add the selected stories to an existing script")
+                    .popover(isPresented: $choosingScript, arrowEdge: .top) {
+                        ScriptPicker { id in
+                            choosingScript = false
+                            Task { await store.addSelected(toScript: id) }
                         }
                     }
-                Button("New Project") { Task { await store.createProjectFromSelected() } }
+                Button("New Script") { Task { await store.createScriptFromSelected() } }
                     .buttonStyle(PrimaryButtonStyle())
             }
             .disabled(count == 0)
         }
-        .font(.system(size: 12))
+        .font(.system(size: Zoom.s(12)))
         .padding(.horizontal, 16)
         .frame(height: 48)
         .card()
     }
 }
 
-/// Projects to add the selection to, newest episode first.
-private struct ProjectPicker: View {
+/// Scripts to add the selection to, newest episode first.
+private struct ScriptPicker: View {
     @Environment(AppStore.self) private var store
-    var onPick: (Project.ID) -> Void
+    var onPick: (Script.ID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            GroupLabel(text: "Add to project")
+            GroupLabel(text: "Add to script")
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 6)
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(store.projects.sorted { $0.episodeDate > $1.episodeDate }) { project in
+                    ForEach(store.scripts.sorted { $0.episodeDate > $1.episodeDate }) { script in
                         HoverRow { _ in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(project.name)
-                                    .font(.system(size: 13, weight: .medium))
+                                Text(script.name)
+                                    .font(.system(size: Zoom.s(13), weight: .medium))
                                     .foregroundStyle(Theme.textPrimary)
-                                Text("\(project.episodeDate.formatted(date: .abbreviated, time: .omitted))  ·  \(project.notes.count) stories")
-                                    .font(.system(size: 11))
+                                Text("\(script.episodeDate.formatted(date: .abbreviated, time: .omitted))  ·  \(script.notes.count) stories")
+                                    .font(.system(size: Zoom.s(11)))
                                     .foregroundStyle(Theme.textTertiary)
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                         }
-                        .onTapGesture { onPick(project.id) }
+                        .onTapGesture { onPick(script.id) }
                     }
                 }
                 .padding(.horizontal, 6)
@@ -194,7 +203,7 @@ private struct SelectableStoryRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: Zoom.s(13), weight: .semibold))
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(kind == nil ? 3 : 1)
                         Spacer(minLength: 4)
@@ -202,13 +211,13 @@ private struct SelectableStoryRow: View {
                     }
                     if !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 12))
+                            .font(.system(size: Zoom.s(12)))
                             .foregroundStyle(Theme.textSecondary)
                             .lineLimit(3)
                     }
                     HStack(spacing: 6) {
                         Text(meta.joined(separator: "  ·  "))
-                            .font(.system(size: 11))
+                            .font(.system(size: Zoom.s(11)))
                             .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
                         if let url {
@@ -216,7 +225,7 @@ private struct SelectableStoryRow: View {
                                 NSWorkspace.shared.open(url)
                             } label: {
                                 Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 11))
+                                    .font(.system(size: Zoom.s(11)))
                                     .foregroundStyle(Theme.textTertiary)
                             }
                             .buttonStyle(.plain)
@@ -273,11 +282,13 @@ struct Checkbox: View {
             .overlay {
                 if isOn {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: Zoom.s(9), weight: .bold))
                         .foregroundStyle(.white)
                 }
             }
             .frame(width: 15, height: 15)
+            // The inside is transparent when unchecked; make the whole box clickable.
+            .contentShape(Rectangle())
     }
 }
 
@@ -286,7 +297,7 @@ struct KindBadge: View {
 
     var body: some View {
         Label(kind.label, systemImage: kind.symbol)
-            .font(.system(size: 10.5, weight: .medium))
+            .font(.system(size: Zoom.s(10.5), weight: .medium))
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .frame(height: 18)
@@ -312,7 +323,7 @@ private struct AddStorySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Add to Story Queue")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: Zoom.s(15), weight: .semibold))
                 .padding([.horizontal, .top], 20)
             Form {
                 Section {
@@ -321,7 +332,7 @@ private struct AddStorySheet: View {
                         .labelsHidden()
                 } footer: {
                     Text("Links are fetched by the notes service. Anything else becomes a note.")
-                        .font(.system(size: 11))
+                        .font(.system(size: Zoom.s(11)))
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -354,6 +365,7 @@ struct StoryTrackerPanel: View {
     @State private var newTitle = ""
     @State private var adding = false
     @State private var editing: TrackedStory?
+    @State private var pendingStop: TrackedStory?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -372,7 +384,7 @@ struct StoryTrackerPanel: View {
                                 .onTapGesture { editing = story }
                                 .contextMenu {
                                     Button("Edit…") { editing = story }
-                                    Button("Stop Tracking", role: .destructive) { store.deleteTrackedStory(story.id) }
+                                    Button("Stop Tracking…", role: .destructive) { pendingStop = story }
                                 }
                         }
                     }
@@ -393,6 +405,15 @@ struct StoryTrackerPanel: View {
         .sheet(item: $editing) { story in
             TrackedStorySheet(story: story) { store.updateTrackedStory($0) }
         }
+        .confirmationDialog(
+            "Stop tracking “\(pendingStop?.title ?? "")”?",
+            isPresented: Binding(get: { pendingStop != nil }, set: { if !$0 { pendingStop = nil } }),
+            presenting: pendingStop
+        ) { story in
+            Button("Stop Tracking", role: .destructive) { store.deleteTrackedStory(story.id) }
+        } message: { story in
+            Text("The story and its \(story.mentions.count) tagged \(story.mentions.count == 1 ? "mention" : "mentions") will be permanently deleted and no longer stored. This can’t be undone. Your scripts aren’t changed.")
+        }
     }
 }
 
@@ -408,22 +429,22 @@ private struct TrackedStoryRow: View {
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(story.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: Zoom.s(13), weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Text(story.latestUpdate.isEmpty ? "No updates yet" : story.latestUpdate)
-                        .font(.system(size: 12))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(story.latestUpdate.isEmpty ? Theme.textTertiary : Theme.textSecondary)
                         .lineLimit(2)
                     if let last = story.mentions.last {
-                        Text("\(story.mentions.count) \(story.mentions.count == 1 ? "mention" : "mentions")  ·  last in \(last.projectName), \(last.episodeDate.formatted(.dateTime.month(.abbreviated).day()))")
-                            .font(.system(size: 11))
+                        Text("\(story.mentions.count) \(story.mentions.count == 1 ? "mention" : "mentions")  ·  last in \(last.scriptName), \(last.episodeDate.formatted(.dateTime.month(.abbreviated).day()))")
+                            .font(.system(size: Zoom.s(11)))
                             .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
                 Text(story.lastUpdated.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 11))
+                    .font(.system(size: Zoom.s(11)))
                     .foregroundStyle(Theme.textTertiary)
             }
             .padding(10)
@@ -433,12 +454,13 @@ private struct TrackedStoryRow: View {
 
 private struct TrackedStorySheet: View {
     @State var story: TrackedStory
+    @State private var pendingRemoval: StoryMention?
     var onSave: (TrackedStory) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Tracked Story")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: Zoom.s(15), weight: .semibold))
                 .padding([.horizontal, .top], 20)
             Form {
                 TextField("Story", text: $story.title)
@@ -448,21 +470,19 @@ private struct TrackedStorySheet: View {
                     Section("What you’ve said (\(story.mentions.count))") {
                         ForEach(story.mentions.reversed()) { mention in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("\(mention.projectName)  ·  \(mention.episodeDate.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.system(size: 11, weight: .semibold))
+                                Text("\(mention.scriptName)  ·  \(mention.episodeDate.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.system(size: Zoom.s(11), weight: .semibold))
                                     .foregroundStyle(.secondary)
                                 Text("“\(mention.excerpt)”")
-                                    .font(.system(size: 12))
+                                    .font(.system(size: Zoom.s(12)))
                                     .italic()
                                 if let note = mention.note {
-                                    Text(note).font(.system(size: 12))
+                                    Text(note).font(.system(size: Zoom.s(12)))
                                 }
                             }
                             .padding(.vertical, 2)
                             .contextMenu {
-                                Button("Remove Mention", role: .destructive) {
-                                    story.mentions.removeAll { $0.id == mention.id }
-                                }
+                                Button("Remove Mention…", role: .destructive) { pendingRemoval = mention }
                             }
                         }
                     }
@@ -473,6 +493,15 @@ private struct TrackedStorySheet: View {
             SheetButtons(confirmTitle: "Save", canConfirm: true) { onSave(story) }
         }
         .frame(width: 500)
+        .confirmationDialog(
+            "Remove this mention?",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            presenting: pendingRemoval
+        ) { mention in
+            Button("Remove", role: .destructive) { story.mentions.removeAll { $0.id == mention.id } }
+        } message: { mention in
+            Text("The passage from \(mention.scriptName) will no longer be stored with this story once you click Save. The script itself isn’t changed.")
+        }
     }
 }
 

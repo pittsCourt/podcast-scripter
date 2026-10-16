@@ -5,11 +5,12 @@ struct TrackStorySheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     var excerpt: String
-    var projectID: Project.ID
+    var scriptID: Script.ID
 
     @State private var choice: Choice = .new
     @State private var newTitle = ""
-    @State private var note = ""
+    /// The update added to the story. Starts as the highlighted text.
+    @State private var update = ""
     @State private var search = ""
     @State private var suggestion: StorySuggestion?
     @State private var suggesting = false
@@ -27,32 +28,49 @@ struct TrackStorySheet: View {
     }
 
     private var canSave: Bool {
+        guard !update.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         switch choice {
-        case .new: !newTitle.trimmingCharacters(in: .whitespaces).isEmpty
-        case .existing: true
+        case .new: return !newTitle.trimmingCharacters(in: .whitespaces).isEmpty
+        case .existing: return true
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Track as Story")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: Zoom.s(15), weight: .semibold))
                 .padding([.horizontal, .top], 20)
-
-            Text("“\(excerpt)”")
-                .font(.system(size: 12))
-                .italic()
-                .foregroundStyle(.secondary)
-                .lineLimit(4)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
 
             gemmaBanner
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
 
             Form {
+                Section {
+                    TextField("Update", text: $update, axis: .vertical)
+                        .lineLimit(3...8)
+                        .labelsHidden()
+                    if let summary = suggestion?.update, !summary.isEmpty, summary != update {
+                        Button {
+                            update = summary
+                        } label: {
+                            Label("Use Gemma’s summary: “\(summary)”", systemImage: "sparkles")
+                                .font(.system(size: Zoom.s(11.5)))
+                                .multilineTextAlignment(.leading)
+                        }
+                        .buttonStyle(.link)
+                    }
+                } header: {
+                    Text("Update")
+                } footer: {
+                    Text("Added to the story’s history and shown as its latest update in the Story Tracker.")
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Story") {
+                    if choice == .new {
+                        TextField("Story name", text: $newTitle, prompt: Text("e.g. Justen Glad Injury"))
+                    }
                     if store.trackedStories.count > 6 {
                         TextField("Filter stories", text: $search)
                     }
@@ -65,16 +83,6 @@ struct TrackStorySheet: View {
                     }
                     .pickerStyle(.radioGroup)
                     .labelsHidden()
-                    if choice == .new {
-                        TextField("New story title", text: $newTitle, prompt: Text("e.g. Justen Glad Injury"))
-                    }
-                }
-                Section {
-                    TextField("Update (optional)", text: $note, prompt: Text("e.g. Back in full training, expected for SKC"), axis: .vertical)
-                        .lineLimit(2...4)
-                } footer: {
-                    Text("Shown as the story’s latest update in the Story Tracker. Leave empty to use the passage.")
-                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -83,13 +91,16 @@ struct TrackStorySheet: View {
             SheetButtons(confirmTitle: "Track", canConfirm: canSave) {
                 var storyID: TrackedStory.ID?
                 if case .existing(let id) = choice { storyID = id }
-                store.tagPassage(excerpt, in: projectID, story: storyID, newTitle: newTitle, note: note)
+                // The passage is kept as the mention; a different update text is saved as its note.
+                let text = update.trimmingCharacters(in: .whitespacesAndNewlines)
+                store.tagPassage(excerpt, in: scriptID, story: storyID, newTitle: newTitle, note: text == excerpt ? nil : text)
             }
         }
         .frame(width: 460)
         .onAppear {
+            update = excerpt
             // Until Gemma answers, suggest the story most recently tagged in this episode.
-            if let recent = store.trackedStories(in: projectID).first { choice = .existing(recent.id) }
+            if let recent = store.trackedStories(in: scriptID).first { choice = .existing(recent.id) }
         }
         .task { await suggest() }
     }
@@ -101,16 +112,16 @@ struct TrackStorySheet: View {
                 ProgressView().controlSize(.small)
                 Text("Gemma is matching this to your tracked stories…")
             }
-            .font(.system(size: 11.5))
+            .font(.system(size: Zoom.s(11.5)))
             .foregroundStyle(.secondary)
         } else if let suggestion {
             VStack(alignment: .leading, spacing: 6) {
                 Label(suggestionSummary(suggestion), systemImage: "sparkles")
-                    .font(.system(size: 11.5))
+                    .font(.system(size: Zoom.s(11.5)))
                     .foregroundStyle(.secondary)
                 if let contradiction = suggestion.contradiction {
                     Label(contradiction, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(Color(hex: 0xFBBF24))
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -119,7 +130,7 @@ struct TrackStorySheet: View {
             }
         } else if let suggestionError {
             Label("Gemma couldn’t suggest a story: \(suggestionError)", systemImage: "sparkles")
-                .font(.system(size: 11))
+                .font(.system(size: Zoom.s(11)))
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)
         }
@@ -127,9 +138,9 @@ struct TrackStorySheet: View {
 
     private func suggestionSummary(_ suggestion: StorySuggestion) -> String {
         if let id = suggestion.storyId, let story = store.trackedStories.first(where: { $0.id.uuidString == id }) {
-            return "Gemma suggests “\(story.title)” and drafted the update."
+            return "Gemma suggests this belongs to “\(story.title)”."
         }
-        return "Gemma suggests a new story\(suggestion.newTitle.map { ": “\($0)”" } ?? "") and drafted the update."
+        return "Gemma suggests a new story\(suggestion.newTitle.map { ": “\($0)”" } ?? "")."
     }
 
     /// Asks Gemma which story this belongs to, then pre-fills the choices (still editable).
@@ -137,7 +148,7 @@ struct TrackStorySheet: View {
         suggesting = true
         defer { suggesting = false }
         do {
-            guard let result = try await store.suggestStory(for: excerpt, in: projectID) else { return }
+            guard let result = try await store.suggestStory(for: excerpt, in: scriptID) else { return }
             suggestion = result
             if let id = result.storyId, let uuid = UUID(uuidString: id), store.trackedStories.contains(where: { $0.id == uuid }) {
                 choice = .existing(uuid)
@@ -145,7 +156,6 @@ struct TrackStorySheet: View {
                 choice = .new
                 if newTitle.isEmpty { newTitle = title }
             }
-            if note.isEmpty { note = result.update }
         } catch {
             suggestionError = error.localizedDescription
         }

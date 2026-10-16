@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0F0F11">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Riot Inbox">
-  <title>Riot Report Inbox</title>
+  <title>Podcast Inbox</title>
   <style>
     :root {
       --bg: #0F0F11; --surface: #17171A; --raised: #1E1E22; --border: rgba(255,255,255,.08);
@@ -20,6 +20,13 @@
     }
     main { max-width: 640px; margin: 0 auto; }
     h1 { font-size: 20px; margin: 4px 0 16px; letter-spacing: -.01em; }
+    .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .top-bar h1 { margin: 4px 0 12px; }
+    .project { display: flex; align-items: center; gap: 8px; color: var(--text3); font-size: 12px; margin-bottom: 8px; }
+    .project select {
+      background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px;
+      padding: 7px 10px; font: 600 14px/1.2 inherit; font-family: inherit; max-width: 60vw;
+    }
     h1 span { color: var(--text3); font-weight: 500; font-size: 14px; margin-left: 6px; }
     form { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px; }
     textarea {
@@ -72,7 +79,13 @@
 </head>
 <body>
 <main>
-  <h1>Riot Report Inbox</h1>
+  <header class="top-bar">
+    <h1>Inbox</h1>
+    <label class="project">
+      <span>Project</span>
+      <select id="project" aria-label="Project"></select>
+    </label>
+  </header>
   <form id="add">
     <textarea id="input" placeholder="Paste an X post or article link, or type a note…" autocapitalize="sentences"></textarea>
     <div class="row">

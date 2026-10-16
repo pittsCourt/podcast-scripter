@@ -84,6 +84,8 @@ async function refreshFeed(feed) {
       const published = entry.published && !Number.isNaN(Date.parse(entry.published))
         ? new Date(Date.parse(entry.published)).toISOString()
         : null;
+      // Older than we keep: skip it, or it gets added and pruned again on every refresh.
+      if (published && Date.now() - Date.parse(published) > KEEP_DAYS * 86400000) continue;
       // Google News descriptions just repeat the headline -- drop those.
       const summary = entry.summary.startsWith(entry.title) ? '' : entry.summary;
       db.insertItem({
@@ -106,6 +108,7 @@ async function refreshFeed(feed) {
   }
 }
 
+/** Refreshes the current project's feeds. */
 async function refreshAll() {
   const results = [];
   for (const feed of db.listFeeds()) results.push(await refreshFeed(feed));
@@ -113,9 +116,20 @@ async function refreshAll() {
   return results;
 }
 
+/** Refreshes every project's feeds, each inside its own project. */
+async function refreshEveryProject() {
+  const projects = require('./projects');
+  const results = [];
+  for (const project of projects.list()) {
+    const r = await projects.run(project.id, refreshAll);
+    results.push(...r.map((x) => ({ ...x, project: project.id })));
+  }
+  return results;
+}
+
 function startScheduler(minutes) {
   if (!(minutes > 0)) return;
-  const run = () => refreshAll().then((results) => {
+  const run = () => refreshEveryProject().then((results) => {
     const summary = results.map((r) => (r.error ? `${r.feed}: ${r.error}` : `${r.feed}: +${r.added}`)).join(', ');
     console.log(`feeds refreshed -- ${summary || 'no feeds'}`);
   });

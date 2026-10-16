@@ -7,24 +7,24 @@ enum ScriptExporter {
     private static let markdown = UTType(filenameExtension: "md", conformingTo: .plainText) ?? .plainText
 
     /// Shows a save panel with a format picker: RTF (Word, Pages, Google Docs), Markdown, or plain text.
-    static func export(_ project: Project) {
+    static func export(_ script: Script) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.rtf, markdown, .plainText]
         if #available(macOS 15, *) {
             panel.showsContentTypes = true
         }
-        panel.nameFieldStringValue = project.displayTitle
+        panel.nameFieldStringValue = script.displayTitle
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        let text = ScriptStyle.load(project)
+        let text = ScriptStyle.load(script)
         let data: Data?
         switch url.pathExtension.lowercased() {
         case "rtf":
-            data = ScriptStyle.exportRTF(text, title: project.displayTitle)
+            data = ScriptStyle.exportRTF(text, title: script.displayTitle)
         case "md", "markdown":
-            data = ScriptStyle.markdown(text, title: project.displayTitle).data(using: .utf8)
+            data = ScriptStyle.markdown(text, title: script.displayTitle).data(using: .utf8)
         default:
-            data = "\(project.displayTitle)\n\n\(project.script)\n".data(using: .utf8)
+            data = "\(script.displayTitle)\n\n\(script.plainText)\n".data(using: .utf8)
         }
 
         do {

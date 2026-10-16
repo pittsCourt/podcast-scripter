@@ -21,6 +21,9 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15
 const TIMEOUT_MS = 30000;
 
 const store = db.connection;
+const projects = require('./projects');
+const pid = () => projects.current();
+// New installs: the pre-projects table is created here and upgraded by migrate.js on start.
 store.exec(`
   CREATE TABLE IF NOT EXISTS ranking_snapshots (
     source        TEXT NOT NULL,
@@ -51,7 +54,7 @@ const SOURCES = [
   { id: 'opta', name: 'Opta', group: 'World', scale: null, fetch: fetchOpta },
 ];
 
-const status = new Map(); // source id -> { checkedAt, error }
+const status = new Map(); // "<project>:<source>" -> { checkedAt, error }
 
 /** Sources switched on in Settings. */
 const enabledSources = () => SOURCES.filter((source) => sourceSettings(source.id).enabled !== false);
@@ -79,17 +82,17 @@ const seasonOf = (date) => Number(date.slice(0, 4));
 const seasonStart = () => `${currentSeason()}-01-01`;
 
 function knownUrls(source) {
-  return new Set(store.prepare('SELECT url FROM ranking_snapshots WHERE source = ? AND url IS NOT NULL').all(source).map((r) => r.url));
+  return new Set(store.prepare('SELECT url FROM ranking_snapshots WHERE project_id = ? AND source = ? AND url IS NOT NULL').all(pid(), source).map((r) => r.url));
 }
 
 function save(source, snap) {
   store.prepare(`
-    INSERT INTO ranking_snapshots (source, season, date, rank, previous_rank, label, url, extra, fetched_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (source, date) DO UPDATE SET
+    INSERT INTO ranking_snapshots (project_id, source, season, date, rank, previous_rank, label, url, extra, fetched_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (project_id, source, date) DO UPDATE SET
       season = excluded.season, rank = excluded.rank, previous_rank = excluded.previous_rank,
       label = excluded.label, url = excluded.url, extra = excluded.extra, fetched_at = excluded.fetched_at
-  `).run(source, seasonOf(snap.date), snap.date, snap.rank, snap.previousRank ?? null, snap.label ?? null,
+  `).run(pid(), source, seasonOf(snap.date), snap.date, snap.rank, snap.previousRank ?? null, snap.label ?? null,
     snap.url ?? null, snap.extra ? JSON.stringify(snap.extra) : null, new Date().toISOString());
 }
 
@@ -275,20 +278,21 @@ async function fetchOpta() {
 
 /** Seasons that have saved rankings, newest first (always including the current one). */
 function seasons() {
-  const saved = store.prepare('SELECT DISTINCT season FROM ranking_snapshots ORDER BY season DESC').all().map((r) => r.season);
+  const saved = store.prepare('SELECT DISTINCT season FROM ranking_snapshots WHERE project_id = ? ORDER BY season DESC').all(pid()).map((r) => r.season);
   return [...new Set([currentSeason(), ...saved])].sort((a, b) => b - a);
 }
 
-let inFlight = null;
-let scheduleInfo = null;
-const { getMeta, setMeta } = require('./schedule');
+const inFlight = new Map(); // project id -> running sync
+const scheduleInfo = new Map(); // project id -> { description }
+const { getMeta, setMeta } = projects;
 
-/** Fetches every source. Overlapping calls (Sync button + schedule) share one run. */
+/** Fetches every source for the current project. Overlapping calls (Sync button + schedule) share one run. */
 function syncAll() {
-  if (!inFlight) {
-    inFlight = runSync().finally(() => { inFlight = null; });
+  const id = pid();
+  if (!inFlight.has(id)) {
+    inFlight.set(id, runSync().finally(() => inFlight.delete(id)));
   }
-  return inFlight;
+  return inFlight.get(id);
 }
 
 async function runSync() {
@@ -296,29 +300,29 @@ async function runSync() {
     try {
       const snaps = await source.fetch();
       snaps.forEach((s) => save(source.id, s));
-      status.set(source.id, { checkedAt: new Date().toISOString(), error: null });
+      status.set(`${pid()}:${source.id}`, { checkedAt: new Date().toISOString(), error: null });
     } catch (err) {
       console.warn(`rankings: ${source.id} failed: ${err.message}`);
-      status.set(source.id, { checkedAt: new Date().toISOString(), error: err.message });
+      status.set(`${pid()}:${source.id}`, { checkedAt: new Date().toISOString(), error: err.message });
     }
   }));
-  setMeta('rankings.lastSyncAt', new Date().toISOString());
+  setMeta(`rankings.lastSyncAt:${pid()}`, new Date().toISOString());
   return summary();
 }
 
-function setSchedule(info) {
-  scheduleInfo = info;
+function setSchedule(info, id = pid()) {
+  scheduleInfo.set(id, info);
 }
 
 function summary(season = currentSeason()) {
-  const rows = store.prepare('SELECT * FROM ranking_snapshots WHERE season = ? ORDER BY date').all(season);
+  const rows = store.prepare('SELECT * FROM ranking_snapshots WHERE project_id = ? AND season = ? ORDER BY date').all(pid(), season);
   const isCurrent = season === currentSeason();
   return {
     season,
     seasons: seasons(),
-    lastSyncAt: getMeta('rankings.lastSyncAt'),
-    syncing: !!inFlight,
-    autoSync: scheduleInfo && scheduleInfo.description,
+    lastSyncAt: getMeta(`rankings.lastSyncAt:${pid()}`),
+    syncing: inFlight.has(pid()),
+    autoSync: (scheduleInfo.get(pid()) || {}).description || null,
     sources: enabledSources().map((source) => {
       const history = rows.filter((r) => r.source === source.id).map((r) => ({
         date: r.date,
@@ -333,7 +337,7 @@ function summary(season = currentSeason()) {
         ? latest.previous_rank ?? (mine.length > 1 ? mine[mine.length - 2].rank : null)
         : null;
       // Sync status only describes the current season.
-      const s = (isCurrent && status.get(source.id)) || {};
+      const s = (isCurrent && status.get(`${pid()}:${source.id}`)) || {};
       return {
         id: source.id,
         name: source.name,

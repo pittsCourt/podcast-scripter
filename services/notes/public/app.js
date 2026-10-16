@@ -11,12 +11,26 @@ const FILTERS = {
 
 let items = [];
 let filter = 'all';
+// The project new items go to and lists come from. Remembered in this browser; ?project= wins.
+let project = new URLSearchParams(location.search).get('project') || savedProject();
+
+function savedProject() {
+  try { return localStorage.getItem('project') || ''; } catch { return ''; }
+}
+
+function rememberProject(id) {
+  try { localStorage.setItem('project', id); } catch { /* private mode */ }
+}
 
 // The browser handles the login (HTTP Basic) and resends it with every request.
 async function api(path, options = {}) {
   const res = await fetch(path, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(project ? { 'X-Project': project } : {}),
+      ...(options.headers || {}),
+    },
   });
   if (res.status === 401) throw new Error('Not logged in. Reload the page to log in.');
   if (res.status === 204) return null;
@@ -55,8 +69,34 @@ function dayLabel(date) {
 async function setStatus(item, status) {
   try {
     await api(`/api/items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
-    load();
-loadRankings();
+    async function loadProjects() {
+  const select = $('project');
+  try {
+    const list = await api('/api/projects', { headers: { 'X-Project': '' } });
+    if (!list.some((p) => p.id === project)) project = (list.find((p) => p.isDefault) || list[0] || {}).id || '';
+    select.replaceChildren(...list.map((p) => {
+      const option = el('option', { value: p.id }, p.team ? `${p.name} · ${p.team.name}` : p.name);
+      if (p.id === project) option.selected = true;
+      return option;
+    }));
+    select.parentElement.hidden = list.length < 2;
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+}
+
+$('project').addEventListener('change', (event) => {
+  project = event.target.value;
+  rememberProject(project);
+  showMessage('');
+  load();
+  loadRankings();
+});
+
+loadProjects().then(() => {
+  load();
+  loadRankings();
+});
   } catch (err) {
     showMessage(err.message, true);
   }
@@ -66,8 +106,34 @@ async function remove(item) {
   if (!confirm(`Permanently delete "${item.title}" from your history?`)) return;
   try {
     await api(`/api/items/${item.id}`, { method: 'DELETE' });
-    load();
-loadRankings();
+    async function loadProjects() {
+  const select = $('project');
+  try {
+    const list = await api('/api/projects', { headers: { 'X-Project': '' } });
+    if (!list.some((p) => p.id === project)) project = (list.find((p) => p.isDefault) || list[0] || {}).id || '';
+    select.replaceChildren(...list.map((p) => {
+      const option = el('option', { value: p.id }, p.team ? `${p.name} · ${p.team.name}` : p.name);
+      if (p.id === project) option.selected = true;
+      return option;
+    }));
+    select.parentElement.hidden = list.length < 2;
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+}
+
+$('project').addEventListener('change', (event) => {
+  project = event.target.value;
+  rememberProject(project);
+  showMessage('');
+  load();
+  loadRankings();
+});
+
+loadProjects().then(() => {
+  load();
+  loadRankings();
+});
   } catch (err) {
     showMessage(err.message, true);
   }
@@ -266,8 +332,34 @@ $('add').addEventListener('submit', async (event) => {
     const item = await api('/api/items', { method: 'POST', body: JSON.stringify({ input }) });
     $('input').value = '';
     showMessage(`Added: ${item.title}`);
-    load();
-loadRankings();
+    async function loadProjects() {
+  const select = $('project');
+  try {
+    const list = await api('/api/projects', { headers: { 'X-Project': '' } });
+    if (!list.some((p) => p.id === project)) project = (list.find((p) => p.isDefault) || list[0] || {}).id || '';
+    select.replaceChildren(...list.map((p) => {
+      const option = el('option', { value: p.id }, p.team ? `${p.name} · ${p.team.name}` : p.name);
+      if (p.id === project) option.selected = true;
+      return option;
+    }));
+    select.parentElement.hidden = list.length < 2;
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+}
+
+$('project').addEventListener('change', (event) => {
+  project = event.target.value;
+  rememberProject(project);
+  showMessage('');
+  load();
+  loadRankings();
+});
+
+loadProjects().then(() => {
+  load();
+  loadRankings();
+});
   } catch (err) {
     showMessage(err.message, true);
   } finally {
@@ -275,5 +367,31 @@ loadRankings();
   }
 });
 
-load();
-loadRankings();
+async function loadProjects() {
+  const select = $('project');
+  try {
+    const list = await api('/api/projects', { headers: { 'X-Project': '' } });
+    if (!list.some((p) => p.id === project)) project = (list.find((p) => p.isDefault) || list[0] || {}).id || '';
+    select.replaceChildren(...list.map((p) => {
+      const option = el('option', { value: p.id }, p.team ? `${p.name} · ${p.team.name}` : p.name);
+      if (p.id === project) option.selected = true;
+      return option;
+    }));
+    select.parentElement.hidden = list.length < 2;
+  } catch (err) {
+    showMessage(err.message, true);
+  }
+}
+
+$('project').addEventListener('change', (event) => {
+  project = event.target.value;
+  rememberProject(project);
+  showMessage('');
+  load();
+  loadRankings();
+});
+
+loadProjects().then(() => {
+  load();
+  loadRankings();
+});

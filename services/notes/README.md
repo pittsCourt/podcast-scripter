@@ -56,6 +56,10 @@ curl -H "Authorization: Bearer $NOTES_TOKEN" -H "Content-Type: application/json"
   -d '{"input":"https://x.com/realsaltlake/status/2098189245450264775"}' http://localhost:3030/api/items
 ```
 
+## Projects
+
+A project is one show about one team. Each has its own settings, inbox and history, news feeds, power-ranking history and weekly sync. `GET /api/projects` lists them; `POST /api/projects` with `{ name, fromProject?, team, show }` creates one, copying another project's settings when `fromProject` is given; `PATCH /api/projects/:id` takes `{ name?, makeDefault? }`; and `DELETE /api/projects/:id` deletes a project and everything stored for it. Every other `/api` route acts on the project named in the `X-Project` header or `?project=`, or the default project when neither is given (so existing Shortcuts keep working). Data from before projects is moved into the first project automatically on start. `.env` secrets (Gmail, Gemini, login) are shared by all projects.
+
 ## Settings
 
 `GET /api/config` returns the show, script template, team (ESPN league and team ID), competitions, news searches and ranking-source settings. `PUT /api/config` saves a full copy (validated), `POST /api/config/reset` restores the defaults, and `GET /api/config/defaults` shows them. Defaults come from `config.default.json`; saved changes live in the database. `GET /api/espn/teams?league=usa.1` lists a league's teams for the Settings picker. Changing the team clears cached standings and matches, the news searches update the Google News feeds, and the weekly schedule restarts. Passwords and tokens stay in `.env`.

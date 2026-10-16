@@ -56,11 +56,11 @@ struct SectionHeader<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: Zoom.s(13), weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
             if let count {
                 Text("\(count)")
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .font(.system(size: Zoom.s(11), weight: .medium).monospacedDigit())
                     .foregroundStyle(Theme.textSecondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
@@ -86,7 +86,7 @@ struct GroupLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: Zoom.s(11), weight: .semibold))
             .kerning(0.6)
             .foregroundStyle(Theme.textTertiary)
     }
@@ -127,7 +127,7 @@ struct IconButton: View {
     var body: some View {
         Button(role: role, action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: Zoom.s(12), weight: .medium))
                 .foregroundStyle(hovering ? (role == .destructive ? Theme.negative : Theme.textPrimary) : Theme.textSecondary)
                 .frame(width: 26, height: 26)
                 .background(
@@ -147,7 +147,7 @@ struct PrimaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: Zoom.s(12), weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .frame(height: 28)
@@ -164,7 +164,7 @@ struct SecondaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(.system(size: Zoom.s(12), weight: .medium))
             .foregroundStyle(Theme.textPrimary)
             .padding(.horizontal, 12)
             .frame(height: 28)
@@ -190,14 +190,14 @@ struct EmptyState: View {
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .light))
+                .font(.system(size: Zoom.s(22), weight: .light))
                 .foregroundStyle(Theme.textTertiary)
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: Zoom.s(13), weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             if let message {
                 Text(message)
-                    .font(.system(size: 12))
+                    .font(.system(size: Zoom.s(12)))
                     .foregroundStyle(Theme.textTertiary)
                     .multilineTextAlignment(.center)
             }

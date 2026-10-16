@@ -137,7 +137,7 @@ struct MatchesView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         if matches.stale {
                             Text("Couldn't reach ESPN; showing the last synced matches.")
-                                .font(.system(size: 11))
+                                .font(.system(size: Zoom.s(11)))
                                 .foregroundStyle(Theme.negative)
                                 .padding(.horizontal, 10)
                         }
@@ -160,7 +160,7 @@ struct MatchesView: View {
                 .padding(.bottom, 2)
             if items.isEmpty {
                 Text(empty)
-                    .font(.system(size: 12))
+                    .font(.system(size: Zoom.s(12)))
                     .foregroundStyle(Theme.textTertiary)
                     .padding(.horizontal, 10)
             } else {
@@ -184,7 +184,7 @@ private struct RecordSummary: View {
                 Text("\(count("D"))D").foregroundStyle(Theme.textSecondary)
                 Text("\(count("L"))L").foregroundStyle(Theme.negative)
             }
-            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+            .font(.system(size: Zoom.s(11), weight: .semibold).monospacedDigit())
             .help("Record in the results shown (draws decided on penalties count as draws)")
         }
     }
@@ -202,11 +202,11 @@ private struct MatchRow: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(match.kickoff?.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) ?? "")
-                        .font(.system(size: 11.5, weight: .medium))
+                        .font(.system(size: Zoom.s(11.5), weight: .medium))
                         .foregroundStyle(Theme.textSecondary)
                     if match.result == nil {
                         Text(match.kickoff?.formatted(date: .omitted, time: .shortened) ?? match.status)
-                            .font(.system(size: 11))
+                            .font(.system(size: Zoom.s(11)))
                             .foregroundStyle(Theme.textTertiary)
                     }
                 }
@@ -214,7 +214,7 @@ private struct MatchRow: View {
 
                 HStack(spacing: 6) {
                     Text(match.isHome ? "vs" : "@")
-                        .font(.system(size: 11))
+                        .font(.system(size: Zoom.s(11)))
                         .foregroundStyle(Theme.textTertiary)
                         .frame(width: 16)
                     AsyncImage(url: match.opponent.logo) { image in
@@ -225,12 +225,12 @@ private struct MatchRow: View {
                     .frame(width: 18, height: 18)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(match.opponent.shortName ?? match.opponent.name ?? "TBD")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: Zoom.s(13), weight: .medium))
                             .foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
                         if let context {
                             Text(context)
-                                .font(.system(size: 10.5))
+                                .font(.system(size: Zoom.s(10.5)))
                                 .foregroundStyle(match.competition == homeCompetition ? Theme.textTertiary : Theme.accent.opacity(0.9))
                                 .lineLimit(1)
                         }
@@ -251,24 +251,24 @@ private struct MatchRow: View {
         if let result = match.result, let goalsFor = match.goalsFor, let goalsAgainst = match.goalsAgainst {
             HStack(spacing: 8) {
                 Text("\(goalsFor)–\(goalsAgainst)")
-                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .font(.system(size: Zoom.s(13), weight: .semibold).monospacedDigit())
                     .foregroundStyle(Theme.textPrimary)
                 VStack(spacing: 1) {
                     Text(result)
-                        .font(.system(size: 10.5, weight: .bold))
+                        .font(.system(size: Zoom.s(10.5), weight: .bold))
                         .foregroundStyle(resultColor(result))
                         .frame(width: 20, height: 18)
                         .background(resultColor(result).opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     if let shootout = match.shootout {
                         Text("\(shootout) pens")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: Zoom.s(9), weight: .semibold))
                             .foregroundStyle(resultColor(shootout))
                     }
                 }
             }
         } else if let broadcast = match.broadcast {
             Text(broadcast)
-                .font(.system(size: 11))
+                .font(.system(size: Zoom.s(11)))
                 .foregroundStyle(Theme.textTertiary)
                 .lineLimit(1)
         }

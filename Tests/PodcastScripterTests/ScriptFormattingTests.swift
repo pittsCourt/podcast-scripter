@@ -85,11 +85,11 @@ struct ScriptFormattingTests {
         controller.setBlock(.quote)
         controller.indent()
 
-        var project = Project(name: "Test", episodeDate: Date())
-        project.script = textView.string
-        project.richText = ScriptStyle.rtfData(textView.attributedString())
+        var script = Script(name: "Test", episodeDate: Date())
+        script.plainText = textView.string
+        script.richText = ScriptStyle.rtfData(textView.attributedString())
 
-        let reloaded = ScriptStyle.load(project)
+        let reloaded = ScriptStyle.load(script)
         let at = { (s: String) in reloaded.attributes(at: (reloaded.string as NSString).range(of: s).location, effectiveRange: nil) }
         #expect(reloaded.string == textView.string)
         #expect(ScriptStyle.block(from: at("Cold")) == .heading1)
@@ -101,10 +101,10 @@ struct ScriptFormattingTests {
     }
 
     @Test func plainScriptsLoadAsBody() {
-        var project = Project(name: "Old", episodeDate: Date())
-        project.script = "Written before formatting"
-        let loaded = ScriptStyle.load(project)
-        #expect(loaded.string == project.script)
+        var script = Script(name: "Old", episodeDate: Date())
+        script.plainText = "Written before formatting"
+        let loaded = ScriptStyle.load(script)
+        #expect(loaded.string == script.plainText)
         #expect(ScriptStyle.block(from: loaded.attributes(at: 0, effectiveRange: nil)) == .body)
     }
 
@@ -202,12 +202,31 @@ private final class FakeNotesService: NotesService, @unchecked Sendable {
     func saveConfig(_ config: AppConfig) async throws -> AppConfig { config }
     func resetConfig() async throws -> AppConfig { .fallback }
     func fetchTeams(league: String) async throws -> [TeamOption] { [] }
+    var projects: [ProjectInfo] = [ProjectInfo(id: "rsl", name: "RSL Riot Report", isDefault: true)]
+    func listProjects() async throws -> [ProjectInfo] { projects }
+    func createProject(_ request: NewProjectRequest) async throws -> ProjectInfo {
+        let created = ProjectInfo(id: request.name.lowercased().replacingOccurrences(of: " ", with: "-"), name: request.name, isDefault: false)
+        projects.append(created)
+        return created
+    }
+    func updateProject(id: String, name: String?, makeDefault: Bool) async throws -> ProjectInfo {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { throw CancellationError() }
+        if let name { projects[i].name = name }
+        return projects[i]
+    }
+    func deleteProject(id: String) async throws { projects.removeAll { $0.id == id } }
     func aiStatus() async throws -> AIStatus { AIStatus(provider: "gemini", model: "test", ready: true, problem: nil) }
     func testAI() async throws -> AIReply { AIReply(text: "ok", provider: "gemini", model: "test", ms: 1) }
     var lastAskContext: AIAppContext?
+    var lastAskHistory: [ChatMessage] = []
     func ask(_ question: String, history: [ChatMessage], app: AIAppContext) async throws -> AskReply {
         lastAskContext = app
-        return AskReply(answer: "You said he was day to day.", model: "test", ms: 1200)
+        lastAskHistory = history
+        return AskReply(answer: "You said he was day to day.", model: "test", ms: 1200, sources: AskSources(
+            excerpts: [.init(episode: "Episode 28", date: "2026-09-29", text: "Diego Luna is day to day.")],
+            episodes: 1, stories: [.init(title: "Luna Knock", mentions: 1)], storiesShortened: false,
+            data: [.init(label: "Results", detail: "33 matches")]
+        ))
     }
     func suggestStory(excerpt: String, episode: AIEpisode, stories: [AIStory]) async throws -> StorySuggestion {
         StorySuggestion(storyId: stories.first?.id, newTitle: nil, update: "Back in training", contradiction: nil)
@@ -217,7 +236,7 @@ private final class FakeNotesService: NotesService, @unchecked Sendable {
 }
 
 @MainActor
-struct AddToProjectTests {
+struct AddToScriptTests {
     @Test func addsSelectedStoriesOnceAndMarksThemUsed() async throws {
         let service = FakeNotesService()
         let post = StoryItem(kind: .xPost, title: "RSL (@realsaltlake)", body: "Lineup is out")
@@ -229,35 +248,35 @@ struct AddToProjectTests {
         defer { try? FileManager.default.removeItem(at: file) }
         let store = AppStore(service: service, fileURL: file)
         await store.refresh()
-        let project = store.createProject(name: "Episode", date: Date(), notes: [post])
+        let script = store.createScript(name: "Episode", date: Date(), notes: [post])
 
         store.selectedStoryIDs = [post.id, headline.id]
-        await store.addSelected(toProject: project.id)
+        await store.addSelected(toScript: script.id)
 
-        let updated = try #require(store.project(project.id))
+        let updated = try #require(store.script(script.id))
         #expect(updated.notes.map(\.id) == [post.id, headline.id]) // the post isn't duplicated
         #expect(updated.notes.last?.kind == .news)
         #expect(service.statuses == [post.id: .used, headline.id: .used])
         #expect(store.storyQueue.isEmpty && store.news.isEmpty && store.selectedStoryIDs.isEmpty)
-        #expect(store.route == .editor(project.id))
+        #expect(store.route == .editor(script.id))
     }
 }
 
 @MainActor
 struct ReturnToQueueTests {
-    @Test func removesFromProjectAndRestoresInbox() async throws {
+    @Test func removesFromScriptAndRestoresInbox() async throws {
         let service = FakeNotesService()
         let post = StoryItem(kind: .xPost, title: "RSL (@realsaltlake)", body: "Lineup")
         let note = StoryItem(kind: .storyNote, title: "Ask about the back line", body: "")
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = AppStore(service: service, fileURL: file)
-        let project = store.createProject(name: "Episode", date: Date(), notes: [post, note])
+        let script = store.createScript(name: "Episode", date: Date(), notes: [post, note])
 
         service.inbox = [post] // what the service lists once the post is back in the inbox
-        await store.returnToQueue([post.id], from: project.id)
+        await store.returnToQueue([post.id], from: script.id)
 
-        let updated = try #require(store.project(project.id))
+        let updated = try #require(store.script(script.id))
         #expect(updated.notes.map(\.id) == [note.id])
         #expect(service.statuses == [post.id: .inbox])
         #expect(store.storyQueue.map(\.id) == [post.id])
@@ -266,25 +285,25 @@ struct ReturnToQueueTests {
 
 @MainActor
 struct ScriptTemplateTests {
-    @Test func newProjectsStartWithShowSections() throws {
+    @Test func newScriptsStartWithShowSections() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = AppStore(service: FakeNotesService(), fileURL: file)
         let date = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 16)))
-        let project = store.createProject(name: "Episode", date: date)
+        let script = store.createScript(name: "Episode", date: date)
 
-        let script = ScriptStyle.load(project)
+        let formatted = ScriptStyle.load(script)
         var headings: [String] = []
-        ScriptStyle.enumerateParagraphs(in: script) { range in
-            let text = (script.string as NSString).substring(with: range).trimmingCharacters(in: .newlines)
-            if ScriptStyle.block(from: script.attributes(at: range.location, effectiveRange: nil)) == .heading2 {
+        ScriptStyle.enumerateParagraphs(in: formatted) { range in
+            let text = (formatted.string as NSString).substring(with: range).trimmingCharacters(in: .newlines)
+            if ScriptStyle.block(from: formatted.attributes(at: range.location, effectiveRange: nil)) == .heading2 {
                 headings.append(text)
             }
         }
         #expect(headings == ["Intro", "Match Report", "RSL News", "League News", "Power Rankings", "Looking Ahead", "Outro"])
-        #expect(project.script.contains("Hello, I’m Court, and this is your RSL Riot Report. Today is Friday, October 16, 2026 and our top stories include:"))
-        #expect(project.script.contains("• [Bullet 3]\nLet’s kick it off."))
-        #expect(project.script.hasSuffix("Until next time, I’m your host Court, and this has been your RSL Riot Report.\n"))
+        #expect(script.plainText.contains("Hello, I’m Court, and this is your RSL Riot Report. Today is Friday, October 16, 2026 and our top stories include:"))
+        #expect(script.plainText.contains("• [Bullet 3]\nLet’s kick it off."))
+        #expect(script.plainText.hasSuffix("Until next time, I’m your host Court, and this has been your RSL Riot Report.\n"))
     }
 
     @Test func deleteKeepsHistory() async {
@@ -391,18 +410,18 @@ struct StoryTaggingTests {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = AppStore(service: FakeNotesService(), fileURL: file)
-        let project = store.createProject(name: "Episode 30", date: Date())
+        let script = store.createScript(name: "Episode 30", date: Date())
         let before = store.trackedStories.count
 
-        let created = try #require(store.tagPassage("Glad jogged at training", in: project.id, story: nil, newTitle: "Glad Return", note: nil))
+        let created = try #require(store.tagPassage("Glad jogged at training", in: script.id, story: nil, newTitle: "Glad Return", note: nil))
         #expect(store.trackedStories.count == before + 1)
         #expect(created.latestUpdate == "Glad jogged at training")
 
-        store.tagPassage("Full training Thursday", in: project.id, story: created.id, newTitle: nil, note: "Likely back vs SKC")
+        store.tagPassage("Full training Thursday", in: script.id, story: created.id, newTitle: nil, note: "Likely back vs SKC")
         let story = try #require(store.trackedStories.first { $0.id == created.id })
         #expect(story.mentions.map(\.excerpt) == ["Glad jogged at training", "Full training Thursday"])
         #expect(story.latestUpdate == "Likely back vs SKC")
-        #expect(store.trackedStories(in: project.id).first?.id == created.id)
+        #expect(store.trackedStories(in: script.id).first?.id == created.id)
     }
 
     /// Stories saved before mentions existed must still load.
@@ -422,18 +441,22 @@ struct GemmaFeatureTests {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = AppStore(service: service, fileURL: file)
-        var project = store.createProject(name: "Episode 28", date: Date())
-        project.script = "Diego Luna is day to day."
-        store.updateProject(project)
-        store.tagPassage("Diego Luna is day to day.", in: project.id, story: nil, newTitle: "Luna Knock", note: nil)
+        var script = store.createScript(name: "Episode 28", date: Date())
+        script.plainText = "Diego Luna is day to day."
+        store.updateScript(script)
+        store.tagPassage("Diego Luna is day to day.", in: script.id, story: nil, newTitle: "Luna Knock", note: nil)
 
         await store.ask("What did we say about Luna?")
         await store.ask("And since then?")
 
         #expect(store.chat.map(\.role) == ["user", "assistant", "user", "assistant"])
         #expect(store.chat[1].detail == "test · 1.2s")
+        #expect(store.chat[1].sources?.excerpts.first?.episode == "Episode 28")
+        // History sent with the follow-up carries only role and content, not the sources.
+        let encoded = try JSONEncoder().encode(service.lastAskHistory)
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("excerpts"))
         let sent = try #require(service.lastAskContext)
-        #expect(sent.projects.contains { $0.script.contains("Diego Luna") })
+        #expect(sent.scripts.contains { $0.script.contains("Diego Luna") })
         #expect(sent.trackedStories.contains { $0.title == "Luna Knock" && $0.mentions.count == 1 })
     }
 
@@ -447,5 +470,71 @@ struct GemmaFeatureTests {
         controller.fillBullets(["RSL draw San Jose 1-1", "Luna back for SKC", "Booth return nears"])
         #expect(textView.string.contains("• RSL draw San Jose 1-1\n• Luna back for SKC\n• Booth return nears\nLet’s kick it off."))
         #expect(!textView.string.contains("[Bullet"))
+    }
+}
+
+@MainActor
+struct ProjectTests {
+    private func tempFile() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
+    }
+
+    /// A data file from before projects (scripts saved under "projects") becomes one project.
+    @Test func legacyFileBecomesOneProjectAndLinks() async throws {
+        let file = tempFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let legacy = #"""
+        {"projects":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"Episode 1","episodeDate":"2026-10-13T00:00:00Z","script":"Hello","notes":[],"createdAt":"2026-10-13T00:00:00Z","updatedAt":"2026-10-13T00:00:00Z"}],
+         "storyQueue":[],"trackedStories":[{"id":"7F9619FF-8B86-D011-B42D-00C04FC964FF","title":"Glad Injury","latestUpdate":"","lastUpdated":"2026-10-01T00:00:00Z"}]}
+        """#
+        try Data(legacy.utf8).write(to: file)
+
+        let service = FakeNotesService()
+        let store = AppStore(service: service, fileURL: file)
+        #expect(store.projectData.count == 1)
+        #expect(store.scripts.map(\.name) == ["Episode 1"])
+        #expect(store.scripts.first?.plainText == "Hello")
+        #expect(store.trackedStories.map(\.title) == ["Glad Injury"])
+
+        await store.refreshProjects()
+        #expect(store.currentProjectID == "rsl")
+        #expect(store.currentProjectName == "RSL Riot Report")
+
+        // Saved in the new format, and still loads.
+        let reopened = AppStore(service: service, fileURL: file)
+        #expect(reopened.currentProjectID == "rsl")
+        #expect(reopened.scripts.map(\.name) == ["Episode 1"])
+    }
+
+    @Test func projectsKeepTheirOwnScriptsAndStories() async throws {
+        let file = tempFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        await store.refreshProjects()
+        let rslScript = store.createScript(name: "RSL Episode", date: Date())
+        store.addTrackedStory(title: "RSL Story")
+        store.chat = [ChatMessage(role: "user", content: "hi")]
+
+        try await store.createProject(NewProjectRequest(
+            name: "Sound Off",
+            fromProject: "rsl",
+            team: .init(name: "Seattle Sounders FC", shortName: "SEA", espnTeamId: "9726", espnLeague: "usa.1", espnSport: "soccer"),
+            show: .init(name: "Sound Off", fullName: "Sound Off", host: "Alex", xHandle: "")
+        ))
+        #expect(store.currentProjectID == "sound-off")
+        #expect(store.scripts.isEmpty)
+        #expect(!store.trackedStories.contains { $0.title == "RSL Story" })
+        #expect(store.chat.isEmpty) // nothing carries over
+        store.createScript(name: "Seattle Episode", date: Date())
+
+        await store.switchProject(to: "rsl")
+        #expect(store.scripts.map(\.id).contains(rslScript.id))
+        #expect(!store.scripts.contains { $0.name == "Seattle Episode" })
+
+        await store.switchProject(to: "sound-off")
+        try await store.deleteCurrentProject()
+        #expect(store.currentProjectID == "rsl")
+        #expect(store.projectData.map(\.id) == ["rsl"])
+        #expect(store.scripts.contains { $0.id == rslScript.id })
     }
 }

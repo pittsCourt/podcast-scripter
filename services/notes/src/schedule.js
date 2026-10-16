@@ -4,14 +4,10 @@
 // the scheduled time, it catches up the next time it's running. The last slot
 // that ran is saved, so restarts don't re-run or skip a week.
 
-const db = require('./db');
 
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-const store = db.connection;
-store.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
-
-const getMeta = (key) => (store.prepare('SELECT value FROM meta WHERE key = ?').get(key) || {}).value || null;
-const setMeta = (key, value) => store.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value);
+const projects = require('./projects');
+const { getMeta, setMeta } = projects;
 
 /** Parses "Tue 10:00" -> { weekday: 2, hour: 10, minute: 0 }, or null to disable. */
 function parseSchedule(text) {
@@ -51,17 +47,20 @@ function describe(schedule, timeZone) {
   return `${day}s at ${time} (${timeZone})`;
 }
 
-let timers = [];
+const timers = new Map(); // project id -> [timeout, interval]
+
+function stopWeekly(projectId) {
+  (timers.get(projectId) || []).forEach((t) => { clearTimeout(t); clearInterval(t); });
+  timers.delete(projectId);
+}
 
 /**
- * Runs `job` on the weekly schedule, replacing any previous schedule (Settings can change it).
- * Returns info for the API.
+ * Runs `job` weekly for one project, replacing its previous schedule (Settings can change it).
+ * The job runs inside that project. Returns info for the API.
  * @param {string} text  e.g. "Tue 16:00"; empty disables it
  */
-function startWeekly(text, timeZone, job) {
-  timers.forEach(clearTimeout);
-  timers.forEach(clearInterval);
-  timers = [];
+function startWeekly(projectId, text, timeZone, job) {
+  stopWeekly(projectId);
   const schedule = parseSchedule(text);
   const info = { description: describe(schedule, timeZone), timeZone };
   if (!schedule) {
@@ -71,29 +70,28 @@ function startWeekly(text, timeZone, job) {
 
   const tick = async () => {
     const slot = latestSlot(schedule, timeZone);
-    const last = getMeta('rankings.lastScheduledSlot');
+    const last = getMeta(`rankings.lastScheduledSlot:${projectId}`);
     if (last === slot) return;
     const spec = `${text} ${timeZone}`;
-    if (!last || getMeta('rankings.scheduleSpec') !== spec) {
+    if (!last || getMeta(`rankings.scheduleSpec:${projectId}`) !== spec) {
       // First start, or the schedule was just changed: start counting from now
       // instead of treating the new slot as a missed run.
-      setMeta('rankings.lastScheduledSlot', slot);
-      setMeta('rankings.scheduleSpec', spec);
+      setMeta(`rankings.lastScheduledSlot:${projectId}`, slot);
+      setMeta(`rankings.scheduleSpec:${projectId}`, spec);
       return;
     }
-    setMeta('rankings.lastScheduledSlot', slot);
-    console.log(`scheduled rankings sync (${slot} ${timeZone})`);
+    setMeta(`rankings.lastScheduledSlot:${projectId}`, slot);
+    console.log(`scheduled rankings sync for ${projectId} (${slot} ${timeZone})`);
     try {
-      await job();
+      await projects.run(projectId, job);
     } catch (err) {
       console.warn(`scheduled rankings sync failed: ${err.message}`);
     }
   };
 
-  timers.push(setTimeout(tick, 5000));
-  timers.push(setInterval(tick, 60000).unref());
-  console.log(`rankings auto-sync: ${info.description}`);
+  timers.set(projectId, [setTimeout(tick, 5000), setInterval(tick, 60000).unref()]);
+  console.log(`rankings auto-sync for ${projectId}: ${info.description}`);
   return info;
 }
 
-module.exports = { startWeekly, getMeta, setMeta, parseSchedule, latestSlot };
+module.exports = { startWeekly, stopWeekly, parseSchedule, latestSlot };

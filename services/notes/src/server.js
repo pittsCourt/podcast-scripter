@@ -10,6 +10,8 @@
 //   GET    /api/news?category=team|league&limit=20
 //   GET    /api/feeds | POST /api/feeds { url, title, category } | DELETE /api/feeds/:id
 //   POST   /api/feeds/refresh
+//   GET    /api/projects | POST /api/projects | PATCH /api/projects/:id | DELETE /api/projects/:id
+//          (all other /api routes act on the project in X-Project or ?project=, else the default)
 //   GET    /api/config | PUT /api/config | POST /api/config/reset | GET /api/config/defaults
 //   GET    /api/espn/teams?league=usa.1      -> teams for the Settings team picker
 //   GET    /api/ai/status | POST /api/ai/test   -> which Gemma provider is active, and a quick check
@@ -28,6 +30,8 @@ const { buildItem, HttpError } = require('./ingest');
 const { createAuth } = require('./auth');
 const { getStandings, getMatches, listTeams } = require('./espn');
 const rankings = require('./rankings');
+const projects = require('./projects');
+const { migrate } = require('./migrate');
 const schedule = require('./schedule');
 const config = require('./config');
 const ai = require('./ai');
@@ -50,6 +54,17 @@ app.use(express.json({ limit: '8mb' }));
 // iOS Shortcuts sometimes sends form bodies; accept both.
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Every API request runs inside a project: X-Project header, ?project=, else the default.
+// (The iPhone Shortcut and inbox page can pick one with ?project=<id>.)
+app.use('/api', (req, res, next) => {
+  const requested = req.get('x-project') || req.query.project;
+  const id = requested || projects.defaultProjectId();
+  if (requested && !projects.get(requested)) {
+    return res.status(404).json({ error: `No project "${requested}".` });
+  }
+  projects.run(id, next);
+});
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, version, authRequired: auth.enabled });
@@ -130,6 +145,67 @@ const espnRoute = (load, what) => wrap(async (req, res) => {
 
 app.get('/api/standings', espnRoute(getStandings, 'standings'));
 app.get('/api/matches', espnRoute(getMatches, 'matches'));
+
+// --- projects (one show and team each) ---
+const projectInfo = (p) => {
+  const cfg = config.get(p.id);
+  return {
+    ...p,
+    isDefault: p.id === projects.defaultProjectId(),
+    showName: cfg.show.fullName,
+    team: { name: cfg.team.name, shortName: cfg.team.shortName, espnSport: cfg.team.espnSport, espnLeague: cfg.team.espnLeague },
+  };
+};
+
+app.get('/api/projects', wrap((req, res) => res.json(projects.list().map(projectInfo))));
+
+/**
+ * { name, fromProject?, team?, show? }: starts from another project's settings (or the
+ * defaults), with the new team and show details on top.
+ */
+app.post('/api/projects', wrap((req, res) => {
+  const { name, fromProject, team, show } = req.body || {};
+  if (!name || !String(name).trim()) throw new HttpError(400, 'A project needs a name.');
+  const base = fromProject && projects.get(fromProject) ? config.get(fromProject) : config.defaults('__new__');
+  const settings = JSON.parse(JSON.stringify(base));
+  if (team) {
+    settings.team = { ...settings.team, ...team, aliases: team.aliases || [team.shortName].filter(Boolean) };
+    settings.news = { ...settings.news, teamQuery: `"${settings.team.name}"` };
+  }
+  settings.show = { ...settings.show, ...(show || {}), fullName: (show && show.fullName) || String(name).trim() };
+  try {
+    config.validate(settings);
+  } catch (err) {
+    throw new HttpError(400, err.message);
+  }
+  const project = projects.create(String(name));
+  projects.run(project.id, () => {
+    config.save(settings, project.id);
+    feeds.syncDefaultFeeds(settings);
+    feeds.refreshAll().catch(() => {});
+  });
+  res.status(201).json(projectInfo(project));
+}));
+
+app.patch('/api/projects/:id', wrap((req, res) => {
+  const project = projects.get(req.params.id);
+  if (!project) throw new HttpError(404, 'Project not found.');
+  const { name, makeDefault } = req.body || {};
+  if (name && String(name).trim()) projects.rename(project.id, String(name));
+  if (makeDefault) projects.setDefault(project.id);
+  res.json(projectInfo(projects.get(project.id)));
+}));
+
+app.delete('/api/projects/:id', wrap((req, res) => {
+  const project = projects.get(req.params.id);
+  if (!project) throw new HttpError(404, 'Project not found.');
+  if (projects.list().length === 1) throw new HttpError(400, 'You can’t delete the only project.');
+  schedule.stopWeekly(project.id);
+  db.deleteProjectData(project.id);
+  config.forget(project.id);
+  projects.remove(project.id);
+  res.status(204).end();
+}));
 
 // --- settings (show, template, team, sources) ---
 app.get('/api/config', wrap((req, res) => res.json(config.get())));
@@ -218,17 +294,24 @@ function importLegacyPosts() {
   console.log(`imported ${imported} posts from x-post-archiver`);
 }
 
-importLegacyPosts();
-feeds.seedDefaultFeeds();
-feeds.startScheduler(FEED_INTERVAL_MINUTES);
-const startRankingsSchedule = (cfg) => rankings.setSchedule(
-  schedule.startWeekly(cfg.rankings.schedule, cfg.rankings.timeZone || 'UTC', rankings.syncAll),
+migrate();
+projects.run(projects.defaultProjectId(), importLegacyPosts);
+
+const startRankingsSchedule = (cfg, id) => rankings.setSchedule(
+  schedule.startWeekly(id, cfg.rankings.schedule, cfg.rankings.timeZone || 'UTC', rankings.syncAll),
+  id,
 );
-startRankingsSchedule(config.get());
-config.onChange((cfg) => {
-  startRankingsSchedule(cfg);
+for (const project of projects.list()) {
+  projects.run(project.id, () => {
+    feeds.seedDefaultFeeds();
+    startRankingsSchedule(config.get(), project.id);
+  });
+}
+feeds.startScheduler(FEED_INTERVAL_MINUTES);
+config.onChange((cfg, id) => projects.run(id, () => {
+  startRankingsSchedule(cfg, id);
   feeds.syncDefaultFeeds(cfg);
-});
+}));
 
 app.listen(PORT, () => {
   const modes = [auth.loginEnabled && 'login', auth.tokenEnabled && 'token'].filter(Boolean);

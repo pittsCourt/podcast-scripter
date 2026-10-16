@@ -1,8 +1,8 @@
 // config.js
-// Show, script template, team/league and data-source settings, shared by every
-// device. Defaults come from config.default.json (edit it to adapt the app to
-// another team); changes made in the Mac app's Settings are saved in the
-// database on top of those defaults. Secrets (passwords, tokens) stay in .env.
+// Show, script template, team/league and data-source settings, one set per project and shared
+// by every device. Defaults come from config.default.json (edit it to adapt the app to another
+// team); changes made in the Mac app's Settings are saved in the database on top of those
+// defaults. Secrets (passwords, tokens, the Gemini key) stay in .env and are shared.
 
 const fs = require('fs');
 const path = require('path');
@@ -13,11 +13,14 @@ const store = db.connection;
 store.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)');
 
 const listeners = [];
-let current = null;
+const cache = new Map(); // project id -> merged settings
+const projects = () => require('./projects');
+const keyFor = (pid) => `config:${pid}`;
 
-function defaults() {
+function defaults(pid = projects().current()) {
   const base = JSON.parse(fs.readFileSync(DEFAULTS_FILE, 'utf8'));
-  // Seed from older .env settings so existing installs keep working.
+  // Older .env settings seed the original project only, so existing installs keep working.
+  if (pid !== projects().defaultProjectId()) return base;
   const forwarded = (process.env.TFZ_FORWARDED_FROM || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (forwarded.length) base.rankings.sources.tfz.forwardedFrom = forwarded;
   if (process.env.TFZ_SENDER) base.rankings.sources.tfz.sender = process.env.TFZ_SENDER;
@@ -38,20 +41,22 @@ function merge(base, saved) {
   return saved !== undefined ? saved : base;
 }
 
-function load() {
-  const row = store.prepare("SELECT value FROM meta WHERE key = 'config'").get();
+function load(pid) {
+  const row = store.prepare('SELECT value FROM meta WHERE key = ?').get(keyFor(pid));
   let saved = {};
   try {
     saved = row ? JSON.parse(row.value) : {};
   } catch {
-    console.warn('saved config is unreadable; using defaults');
+    console.warn(`saved settings for ${pid} are unreadable; using defaults`);
   }
-  current = merge(defaults(), saved);
-  return current;
+  const merged = merge(defaults(pid), saved);
+  cache.set(pid, merged);
+  return merged;
 }
 
-function get() {
-  return current || load();
+/** Settings for a project (the current one by default). */
+function get(pid = projects().current()) {
+  return cache.get(pid) || load(pid);
 }
 
 const isText = (v) => typeof v === 'string';
@@ -78,25 +83,30 @@ function validate(c) {
   }
 }
 
-function save(next) {
-  const merged = merge(defaults(), next);
+function save(next, pid = projects().current()) {
+  const merged = merge(defaults(pid), next);
   validate(merged);
-  store.prepare("INSERT INTO meta (key, value) VALUES ('config', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-    .run(JSON.stringify(merged));
-  current = merged;
-  listeners.forEach((fn) => fn(current));
-  return current;
+  store.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value')
+    .run(keyFor(pid), JSON.stringify(merged));
+  cache.set(pid, merged);
+  listeners.forEach((fn) => fn(merged, pid));
+  return merged;
 }
 
-function reset() {
-  store.prepare("DELETE FROM meta WHERE key = 'config'").run();
-  load();
-  listeners.forEach((fn) => fn(current));
-  return current;
+function reset(pid = projects().current()) {
+  store.prepare('DELETE FROM meta WHERE key = ?').run(keyFor(pid));
+  const fresh = load(pid);
+  listeners.forEach((fn) => fn(fresh, pid));
+  return fresh;
 }
 
+function forget(pid) {
+  cache.delete(pid);
+}
+
+/** `fn(settings, projectId)` runs after a project's settings change. */
 function onChange(fn) {
   listeners.push(fn);
 }
 
-module.exports = { get, save, reset, onChange, defaults };
+module.exports = { get, save, reset, onChange, defaults, validate, forget };

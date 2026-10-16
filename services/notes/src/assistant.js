@@ -17,6 +17,7 @@ const rankings = require('./rankings');
 
 const STOPWORDS = new Set(('the and for with that this from what when where which about have has had were was are our your their they them then than into over after before just been will would could should there here also more most much very some such only other these those does did doing what whats who whom whose why how’s'.split(' ')));
 
+const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const budget = () => Math.max(10000, Number((config.get().ai || {}).contextChars) || 60000);
 const day = (d) => (d ? String(d).slice(0, 10) : '');
 const clip = (text, n) => (text && text.length > n ? `${text.slice(0, n - 1)}…` : text || '');
@@ -35,42 +36,44 @@ function keywords(text) {
 
 // --- service-side context (compact lines) ---
 
-async function serviceContext({ includeHistory = true } = {}) {
+/** The service's data as labeled sections: { label, detail, text }. */
+async function serviceParts({ includeHistory = true } = {}) {
   const { team } = config.get();
   const parts = [];
+  const add = (label, detail, text) => parts.push({ label, detail, text });
 
   const queue = db.listInbox({ status: 'inbox' }).slice(0, 25);
   if (queue.length) {
-    parts.push('STORY QUEUE (saved, not yet used):\n' + queue.map((i) => `- [${i.kind}] ${i.title}: ${clip(i.body, 220)} (${day(i.createdAt)})`).join('\n'));
+    add('Story Queue', count(queue.length, 'item'), 'STORY QUEUE (saved, not yet used):\n' + queue.map((i) => `- [${i.kind}] ${i.title}: ${clip(i.body, 220)} (${day(i.createdAt)})`).join('\n'));
   }
   if (includeHistory) {
     const used = db.listInbox({ status: 'used' }).slice(0, 25);
-    if (used.length) parts.push('STORIES ALREADY USED IN EPISODES:\n' + used.map((i) => `- ${i.title}: ${clip(i.body, 160)} (${day(i.createdAt)})`).join('\n'));
+    if (used.length) add('Stories already used', count(used.length, 'item'), 'STORIES ALREADY USED IN EPISODES:\n' + used.map((i) => `- ${i.title}: ${clip(i.body, 160)} (${day(i.createdAt)})`).join('\n'));
   }
 
   for (const [category, label] of [['team', `${team.shortName} NEWS`], ['league', 'LEAGUE NEWS']]) {
     const news = db.listNews({ category, limit: 15 });
-    if (news.length) parts.push(`${label} (headlines):\n` + news.map((n) => `- ${n.title} — ${n.source} (${day(n.publishedAt || n.createdAt)})`).join('\n'));
+    if (news.length) add(category === 'team' ? `${team.shortName} news` : 'League news', count(news.length, 'headline'), `${label} (headlines):\n` + news.map((n) => `- ${n.title} — ${n.source} (${day(n.publishedAt || n.createdAt)})`).join('\n'));
   }
 
   try {
     const standings = await getStandings();
     for (const conf of standings.conferences) {
-      parts.push(`${conf.name.toUpperCase()} TABLE (${standings.season}): rank team P W D L GD Pts\n`
+      add(`${conf.name} table`, standings.season, `${conf.name.toUpperCase()} TABLE (${standings.season}): rank team P W D L GD Pts\n`
         + conf.rows.map((r) => `${r.rank}. ${r.team} ${r.played} ${r.wins} ${r.draws} ${r.losses} ${r.goalDifference > 0 ? '+' : ''}${r.goalDifference} ${r.points}`).join('\n'));
     }
     const overall = standings.combined.find((r) => r.abbreviation === team.shortName);
-    if (overall) parts.push(`${team.name} is ${overall.rank} of ${standings.combined.length} in the overall table.`);
+    if (overall) add('Overall table', `${team.shortName} ${overall.rank} of ${standings.combined.length}`, `${team.name} is ${overall.rank} of ${standings.combined.length} in the overall table.`);
   } catch { /* standings unavailable: skip */ }
 
   try {
     const matches = await getMatches();
     const line = (m) => `${day(m.date)} ${m.competition}${m.stage && m.stage !== 'Regular Season' ? ` (${m.stage})` : ''}: ${m.isHome ? 'vs' : 'at'} ${m.opponent.name}`;
     if (matches.results.length) {
-      parts.push('RESULTS (newest first, score is ours–theirs):\n' + matches.results.map((m) => `${line(m)} ${m.goalsFor}–${m.goalsAgainst} ${m.result}${m.shootout ? ` (${m.shootout} on penalties)` : ''}`).join('\n'));
+      add('Results', count(matches.results.length, 'match', 'matches'), 'RESULTS (newest first, score is ours–theirs):\n' + matches.results.map((m) => `${line(m)} ${m.goalsFor}–${m.goalsAgainst} ${m.result}${m.shootout ? ` (${m.shootout} on penalties)` : ''}`).join('\n'));
     }
     if (matches.upcoming.length) {
-      parts.push('UPCOMING MATCHES:\n' + matches.upcoming.map((m) => `${line(m)}${m.broadcast ? ` [${m.broadcast}]` : ''}`).join('\n'));
+      add('Upcoming matches', count(matches.upcoming.length, 'match', 'matches'), 'UPCOMING MATCHES:\n' + matches.upcoming.map((m) => `${line(m)}${m.broadcast ? ` [${m.broadcast}]` : ''}`).join('\n'));
     }
   } catch { /* matches unavailable: skip */ }
 
@@ -79,9 +82,33 @@ async function serviceContext({ includeHistory = true } = {}) {
     const history = s.history.map((p) => `${p.date.slice(5)}:${p.rank}`).join(' ');
     return `- ${s.name}: now ${s.latest.rank}${s.previousRank ? ` (previously ${s.previousRank})` : ''}; season: ${history}`;
   });
-  if (rankLines.length) parts.push(`POWER RANKINGS (${ranks.season}, MM-DD:rank):\n` + rankLines.join('\n'));
+  if (rankLines.length) add('Power rankings', `${count(rankLines.length, 'source')}, ${ranks.season}`, `POWER RANKINGS (${ranks.season}, MM-DD:rank):\n` + rankLines.join('\n'));
 
-  return parts.join('\n\n');
+  return parts;
+}
+
+async function serviceContext(options) {
+  return (await serviceParts(options)).map((p) => p.text).join('\n\n');
+}
+
+/** Joins parts within `limit` characters, reporting which made it in (whole or cut short). */
+function fitParts(parts, limit) {
+  let text = '';
+  const included = [];
+  for (const part of parts) {
+    const sep = text ? '\n\n' : '';
+    const room = limit - text.length - sep.length;
+    if (room < 80) break;
+    if (part.text.length <= room) {
+      text += sep + part.text;
+      included.push({ label: part.label, detail: part.detail });
+    } else {
+      text += sep + clip(part.text, room);
+      included.push({ label: part.label, detail: `${part.detail}, shortened to fit` });
+      break;
+    }
+  }
+  return { text, included };
 }
 
 // --- app-side context ---
@@ -95,7 +122,12 @@ function trackerText(stories = [], limit) {
 }
 
 /** Script paragraphs that best match the question, labeled with their episode, within `limit`. */
-function relevantScripts(projects = [], question, limit) {
+function relevantScripts(projects, question, limit) {
+  return pickScripts(projects, question, limit).text;
+}
+
+/** Script paragraphs that best match the question, plus which ones were picked (for Sources). */
+function pickScripts(projects = [], question, limit) {
   const words = keywords(question);
   const list = projects.map((p) => `- ${p.name} (${day(p.date)}), ${(p.script || '').split(/\s+/).filter(Boolean).length} words`);
   let text = `EPISODES (${projects.length}):\n${list.join('\n')}`;
@@ -109,15 +141,17 @@ function relevantScripts(projects = [], question, limit) {
     : paragraphs.sort((a, b) => String(b.p.date).localeCompare(String(a.p.date)) || a.i - b.i);
 
   const picked = [];
+  const excerpts = [];
   let used = text.length + 40;
   for (const x of ranked) {
     const line = `[${x.p.name}, ${day(x.p.date)}] ${x.t}`;
     if (used + line.length > limit) break;
     picked.push(line);
+    excerpts.push({ episode: x.p.name, date: day(x.p.date), text: x.t });
     used += line.length + 1;
   }
   if (picked.length) text += `\n\nSCRIPT EXCERPTS:\n${picked.join('\n')}`;
-  return text;
+  return { text, excerpts, episodes: projects.length };
 }
 
 // --- features ---
@@ -125,14 +159,31 @@ function relevantScripts(projects = [], question, limit) {
 async function ask({ question, history = [], app = {} }) {
   if (!question || !question.trim()) throw Object.assign(new Error('Ask a question.'), { status: 400 });
   const total = budget();
-  const service = clip(await serviceContext(), Math.floor(total * 0.35));
-  const tracker = trackerText(app.trackedStories, Math.floor(total * 0.2));
-  const scripts = relevantScripts(app.projects, `${question} ${history.map((h) => h.content).join(' ')}`, total - service.length - tracker.length);
+  const service = fitParts(await serviceParts(), Math.floor(total * 0.35));
+  const stories = app.trackedStories || [];
+  const trackerLimit = Math.floor(total * 0.2);
+  const tracker = trackerText(stories, trackerLimit);
+  const scripts = pickScripts(app.scripts || app.projects, `${question} ${history.map((h) => h.content).join(' ')}`, total - service.text.length - tracker.length);
 
   const conversation = history.slice(-6).map((h) => `${h.role === 'assistant' ? 'Assistant' : 'Host'}: ${clip(h.content, 1500)}`).join('\n');
-  const prompt = `${service}\n\n${tracker}\n\n${scripts}\n\n${conversation ? `CONVERSATION SO FAR:\n${conversation}\n\n` : ''}Host's question: ${question}`;
+  const prompt = `${service.text}\n\n${tracker}\n\n${scripts.text}\n\n${conversation ? `CONVERSATION SO FAR:\n${conversation}\n\n` : ''}Host's question: ${question}`;
   const reply = await ai.generate({ system: persona(), prompt, temperature: 0.2 });
-  return { answer: reply.text, model: reply.model, provider: reply.provider, ms: reply.ms };
+
+  // Exactly what Gemma was given, so every answer can be checked.
+  const trackerFull = trackerText(stories, Infinity).length <= trackerLimit;
+  return {
+    answer: reply.text,
+    model: reply.model,
+    provider: reply.provider,
+    ms: reply.ms,
+    sources: {
+      excerpts: scripts.excerpts,
+      episodes: scripts.episodes,
+      stories: stories.map((st) => ({ title: st.title, mentions: (st.mentions || []).length })),
+      storiesShortened: !trackerFull,
+      data: service.included,
+    },
+  };
 }
 
 async function suggestStory({ excerpt, episode = {}, stories = [] }) {
@@ -206,4 +257,4 @@ async function introBullets({ episode = {} }) {
   return { bullets, model: reply.model };
 }
 
-module.exports = { ask, suggestStory, briefing, introBullets, keywords, relevantScripts };
+module.exports = { ask, suggestStory, briefing, introBullets, keywords, relevantScripts, pickScripts, fitParts };

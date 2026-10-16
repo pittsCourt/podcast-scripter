@@ -16,7 +16,7 @@ struct RankingsBanner: View {
                     }
                 } else {
                     Text(placeholder)
-                        .font(.system(size: 12))
+                        .font(.system(size: Zoom.s(12)))
                         .foregroundStyle(Theme.textTertiary)
                 }
             }
@@ -39,7 +39,7 @@ struct RankingsBanner: View {
         return HStack(spacing: 12) {
             if showGroups {
                 Text("POWER RANKINGS")
-                    .font(.system(size: 10.5, weight: .bold))
+                    .font(.system(size: Zoom.s(10.5), weight: .bold))
                     .kerning(0.6)
                     .foregroundStyle(Theme.textTertiary)
             }
@@ -78,11 +78,11 @@ private struct RankingChip: View {
                 }
                 if source.error != nil {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: Zoom.s(9)))
                         .foregroundStyle(Color(hex: 0xFBBF24))
                 }
             }
-            .font(.system(size: 12.5).monospacedDigit())
+            .font(.system(size: Zoom.s(12.5)).monospacedDigit())
             .padding(.horizontal, 10)
             .frame(height: 26)
             .background(
@@ -117,7 +117,7 @@ struct ChangeBadge: View {
         if let change, change != 0 {
             HStack(spacing: 1) {
                 Image(systemName: change > 0 ? "arrow.up" : "arrow.down")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: Zoom.s(8), weight: .bold))
                 Text("\(abs(change))")
             }
             .foregroundStyle(change > 0 ? Theme.positive : Theme.negative)
