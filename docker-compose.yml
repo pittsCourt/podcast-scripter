@@ -1,28 +1,8 @@
-# Notes service: `docker compose up -d --build`, then open http://localhost:3030
+# Runs the notes service from the repo root, reading the repo-root .env.
+# The service is defined in services/notes/docker-compose.yml, which also works on its own
+# (that's how it runs on a server or Raspberry Pi; see the README).
 services:
   notes:
-    build: ./services/notes
-    ports:
-      - "3030:3000"
-    volumes:
-      - ./services/notes/data:/app/data
-    environment:
-      # Set in .env (not committed). With none of these set, the service is open (local testing only).
-      NOTES_USER: ${NOTES_USER:-}          # browser login (the inbox page)
-      NOTES_PASSWORD: ${NOTES_PASSWORD:-}
-      NOTES_TOKEN: ${NOTES_TOKEN:-}        # Mac app and iPhone Shortcut
-      FEED_INTERVAL_MINUTES: ${FEED_INTERVAL_MINUTES:-30}
-      # Power rankings: TacticsFreeZone arrives by email, read from Gmail over IMAP.
-      GMAIL_USER: ${GMAIL_USER:-}
-      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
-      # Gemma through the Gemini API (Google AI Studio key). Not needed for a local Ollama model.
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      TFZ_FORWARDED_FROM: ${TFZ_FORWARDED_FROM:-}   # older issues forwarded in from another inbox
-      # Weekly automatic rankings sync ("" turns it off). TFZ's email is in by Tuesday 10 a.m. MDT.
-      # Kept in UTC so daylight saving doesn't move it: 16:00 UTC = 10 a.m. MDT / 9 a.m. MST.
-      RANKINGS_SYNC_SCHEDULE: ${RANKINGS_SYNC_SCHEDULE-Tue 16:00}
-      RANKINGS_SYNC_TZ: ${RANKINGS_SYNC_TZ:-UTC}
-    # Lets the container reach a local Ollama on the host (needed on Linux; built in on Docker Desktop).
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+    extends:
+      file: services/notes/docker-compose.yml
+      service: notes

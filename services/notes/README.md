@@ -10,19 +10,24 @@ The inbox behind the app's Story Queue, plus the RSS news shown in the editor si
 
 ## Run
 
-From the repo root:
+This folder runs on its own, so a server or Raspberry Pi only needs `services/notes`. The main README shows a sparse checkout that downloads just this folder.
 
 ```sh
-docker compose up -d --build     # http://localhost:3030
-docker compose logs -f notes
+cp .env.example .env            # fill in: login, token, optional Gemini key and Gmail
+docker compose up -d --build    # http://localhost:3030
+docker compose logs -f
 ```
 
-Settings come from the repo-root `.env` file, which is not committed:
+On the Mac you can also run it from the repo root with `docker compose up -d --build`. That reads the repo-root `.env` and uses the same definition and the same `data/` folder.
+
+Settings come from `.env`, which is not committed:
 
 | Variable | Used by |
 |---|---|
-| `NOTES_USER`, `NOTES_PASSWORD` | You, in a browser. The inbox page shows the browser's login prompt, and Safari can save it to Passwords. |
+| `NOTES_USER`, `NOTES_PASSWORD` | You, in a browser. The inbox page asks for this login, and Safari can save it to Passwords. |
 | `NOTES_TOKEN` | The Mac app and the iPhone Shortcut, sent as `Authorization: Bearer <token>` |
+| `GEMINI_API_KEY` | Gemma on the Gemini API |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `TFZ_FORWARDED_FROM` | TacticsFreeZone power rankings from Gmail |
 | `FEED_INTERVAL_MINUTES` | How often news feeds refresh (default 30; 0 turns it off) |
 
 Either the login or the token works on every route except `/api/health`, which is always open. With none of them set, the service is open; only do that for local testing. After changing `.env`, run `docker compose up -d` to apply it.
@@ -94,8 +99,5 @@ Gmail needs `GMAIL_USER` and `GMAIL_APP_PASSWORD` in `.env`. Create the app pass
 
 ## Running it elsewhere (server, Raspberry Pi)
 
-The image is based on `node:24-alpine`, which is published for Intel/AMD (amd64) and ARM (arm64, armv7). Storage uses Node's built-in SQLite, so nothing has to be compiled. That means the same `docker compose up -d --build` works on this Mac, a Linux server, or a Raspberry Pi. On a Pi, use the 64-bit Raspberry Pi OS, and plan on a few minutes for the first build.
+The image is based on `node:24-alpine`, which is published for Intel/AMD (amd64) and ARM (arm64, armv7). Storage uses Node's built-in SQLite, so nothing has to be compiled. That means the same `docker compose up -d --build` works on a Mac, a Linux server or a Raspberry Pi. On a Pi, use the 64-bit Raspberry Pi OS, and plan on a few minutes for the first build. Setup, updating and moving your data are covered in the main README.
 
-## Moving to the OptiPlex later
-
-Copy the repo, or just `docker-compose.yml`, `.env` and `services/notes/`, to the server, including `services/notes/data/` to keep the inbox. Then run `docker compose up -d --build` there. Point the Mac app (Settings, ⌘,) and the iPhone Shortcut at `http://192.168.10.135:3030`.
