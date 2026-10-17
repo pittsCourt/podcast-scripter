@@ -122,6 +122,10 @@ Everything specific to one show is a setting, not code. In the app, create a **N
 
 What carries over: standings, matches and competitions work for any ESPN soccer league and team, and news, the template and show details are free-form. The five power-ranking sources each have a reader built for one publication (MLSsoccer.com, ESPN's MLS column, TacticsFreeZone, Concacaf, Opta); other leagues can turn them off, and a new publication needs a new reader in `services/newsdesk/src/rankings.js`. The table layout assumes soccer stats.
 
+## To do
+
+Planned work and parked decisions are in [TODO.md](TODO.md). Next up: backing up the Newsdesk database on the server.
+
 ## Development
 
 ```sh
