@@ -97,6 +97,19 @@ loadProjects().then(() => {
   load();
   loadRankings();
 });
+
+// Keep the page current without reloading: things shared from a phone show up on their own.
+// Checks every 15 seconds while the page is visible, and right away when you come back to it.
+const REFRESH_MS = 15000;
+setInterval(() => {
+  if (document.visibilityState === 'visible') load();
+}, REFRESH_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    load();
+    loadRankings();
+  }
+});
   } catch (err) {
     showMessage(err.message, true);
   }
@@ -133,6 +146,19 @@ $('project').addEventListener('change', (event) => {
 loadProjects().then(() => {
   load();
   loadRankings();
+});
+
+// Keep the page current without reloading: things shared from a phone show up on their own.
+// Checks every 15 seconds while the page is visible, and right away when you come back to it.
+const REFRESH_MS = 15000;
+setInterval(() => {
+  if (document.visibilityState === 'visible') load();
+}, REFRESH_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    load();
+    loadRankings();
+  }
 });
   } catch (err) {
     showMessage(err.message, true);
@@ -247,9 +273,16 @@ document.querySelectorAll('.tabs button').forEach((tab) => {
   }
 }
 
+let lastLoaded = '';
+
 async function load() {
   try {
-    items = await api('/api/items?status=all');
+    const latest = await api('/api/items?status=all');
+    // Only redraw when something changed, so the 15-second refresh never flickers or jumps.
+    const signature = JSON.stringify(latest);
+    if (signature === lastLoaded) return;
+    lastLoaded = signature;
+    items = latest;
     render();
   } catch (err) {
     showMessage(err.message, true);
@@ -360,6 +393,19 @@ loadProjects().then(() => {
   load();
   loadRankings();
 });
+
+// Keep the page current without reloading: things shared from a phone show up on their own.
+// Checks every 15 seconds while the page is visible, and right away when you come back to it.
+const REFRESH_MS = 15000;
+setInterval(() => {
+  if (document.visibilityState === 'visible') load();
+}, REFRESH_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    load();
+    loadRankings();
+  }
+});
   } catch (err) {
     showMessage(err.message, true);
   } finally {
@@ -394,4 +440,17 @@ $('project').addEventListener('change', (event) => {
 loadProjects().then(() => {
   load();
   loadRankings();
+});
+
+// Keep the page current without reloading: things shared from a phone show up on their own.
+// Checks every 15 seconds while the page is visible, and right away when you come back to it.
+const REFRESH_MS = 15000;
+setInterval(() => {
+  if (document.visibilityState === 'visible') load();
+}, REFRESH_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    load();
+    loadRankings();
+  }
 });
