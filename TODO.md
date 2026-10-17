@@ -28,6 +28,7 @@ Scripts and the Story Tracker live only in `~/Library/Application Support/Podcas
 - [ ] iPhone share sheet: the share options looked "huge" after setting up Send to Newsdesk. Not yet diagnosed; check Display Zoom and Larger Text first.
 
 ## Ideas for later
+- [ ] **Search script titles and content properly.** The home search already filters the Scripts list by title and text. It doesn't yet show the matching passage (with the words highlighted), open the script at the match, work from the editor, or search across projects. Tracked-story mentions and resolution notes could be included too.
 - [ ] **Gemma: quote-backed answers.** Each claim quotes its source passage, and the app flags quotes that aren't actually in your scripts.
 - [ ] **Gemma: meaning-based search.** Gemini embeddings, so "the keeper" finds passages about the goalkeeper by name.
 - [ ] **Full article text:** save the readable text of shared articles, so Gemma can answer from them and the reader works offline.
