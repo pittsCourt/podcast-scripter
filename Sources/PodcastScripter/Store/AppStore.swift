@@ -25,10 +25,10 @@ struct ProjectData: Codable, Equatable {
     var id: String
     var name: String
     var scripts: [Script] = []
-    /// Mirrors the notes service inbox, cached for offline use.
+    /// Mirrors Newsdesk inbox, cached for offline use.
     var storyQueue: [StoryItem] = []
     var trackedStories: [TrackedStory] = []
-    /// Last settings seen from the notes service.
+    /// Last settings seen from Newsdesk.
     var config: AppConfig?
 
     init(id: String, name: String, scripts: [Script] = [], storyQueue: [StoryItem] = [], trackedStories: [TrackedStory] = [], config: AppConfig? = nil) {
@@ -107,7 +107,7 @@ final class AppStore {
     /// Every project's local data. The properties below read and write the current one.
     var projectData: [ProjectData] = [ProjectData(id: "", name: AppConfig.fallback.show.fullName)]
     var currentProjectID = ""
-    /// Projects known to the notes service (name, team), for the switcher.
+    /// Projects known to Newsdesk (name, team), for the switcher.
     var serviceProjects: [ProjectInfo] = []
 
     private var currentIndex: Int {
@@ -121,7 +121,7 @@ final class AppStore {
 
     var currentProjectName: String { current.name }
 
-    /// Show, template, team and source settings (from the notes service; cached for offline use).
+    /// Show, template, team and source settings (from Newsdesk; cached for offline use).
     var config: AppConfig {
         get { current.config ?? .fallback }
         set { current.config = newValue }
@@ -142,7 +142,7 @@ final class AppStore {
         set { current.trackedStories = newValue }
     }
 
-    // Fetched from the notes service; not persisted
+    // Fetched from Newsdesk; not persisted
     /// Power rankings, synced on launch and with the banner's Sync button.
     var rankings: RankingsSummary?
     var rankingsSync: SidebarSyncState = .idle
@@ -172,14 +172,14 @@ final class AppStore {
     var selectedStoryIDs: Set<UUID> = []
     var lastError: String?
 
-    private var service: NotesService
+    private var service: NewsdeskService
     /// Tests pass a fake service; it's kept as-is when switching projects.
     private let injectedService: Bool
     private let fileURL: URL
     private var saveTask: Task<Void, Never>?
 
-    init(service: NotesService? = nil, fileURL: URL = AppStore.defaultFileURL) {
-        self.service = service ?? NotesServiceClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
+    init(service: NewsdeskService? = nil, fileURL: URL = AppStore.defaultFileURL) {
+        self.service = service ?? NewsdeskClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
         self.injectedService = service != nil
         self.fileURL = fileURL
         load()
@@ -191,8 +191,8 @@ final class AppStore {
     }
 
     /// A client for the current project (requests carry its id).
-    private func makeClient() -> NotesService {
-        var client = NotesServiceClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
+    private func makeClient() -> NewsdeskService {
+        var client = NewsdeskClient(baseURL: ServiceSettings.baseURL, token: ServiceSettings.token)
         client.projectID = currentProjectID
         return client
     }
@@ -255,7 +255,7 @@ final class AppStore {
         _ = await (queue, sidebar, ranks)
     }
 
-    /// Creates a project for another team on the notes service, then switches to it.
+    /// Creates a project for another team on Newsdesk, then switches to it.
     func createProject(_ request: NewProjectRequest) async throws {
         let created = try await service.createProject(request)
         projectData.append(ProjectData(id: created.id, name: created.name))
@@ -342,14 +342,14 @@ final class AppStore {
 
     // MARK: - Settings
 
-    /// Refreshes settings from the notes service; keeps the cached copy if it can't be reached.
+    /// Refreshes settings from Newsdesk; keeps the cached copy if it can't be reached.
     func loadConfig() async {
         guard let latest = try? await service.fetchConfig(), latest != config else { return }
         config = latest
         save()
     }
 
-    /// Saves settings to the notes service, then re-syncs everything that depends on the team.
+    /// Saves settings to Newsdesk, then re-syncs everything that depends on the team.
     func saveConfig(_ updated: AppConfig) async throws {
         let teamChanged = updated.team != config.team || updated.competitions != config.competitions
         config = try await service.saveConfig(updated)
@@ -719,7 +719,7 @@ final class AppStore {
             }
         }
         if failed > 0 {
-            lastError = "\(failed) of \(returning.count) stories couldn't be returned to the queue in the notes service; they've been removed from the script."
+            lastError = "\(failed) of \(returning.count) stories couldn't be returned to the queue in Newsdesk; they've been removed from the script."
         }
         await refresh()
     }
@@ -732,7 +732,7 @@ final class AppStore {
                 try await service.setStatus(item.id, .dismissed)
                 removeLocally([item.id])
             } catch {
-                lastError = "Couldn't delete from the notes service: \(error.localizedDescription)"
+                lastError = "Couldn't delete from Newsdesk: \(error.localizedDescription)"
                 break
             }
         }

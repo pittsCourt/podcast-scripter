@@ -1,8 +1,8 @@
-# Runs the notes service from the repo root, reading the repo-root .env.
-# The service is defined in services/notes/docker-compose.yml, which also works on its own
+# Runs Newsdesk from the repo root, reading the repo-root .env.
+# The service is defined in services/newsdesk/docker-compose.yml, which also works on its own
 # (that's how it runs on a server or Raspberry Pi; see the README).
 services:
-  notes:
+  newsdesk:
     extends:
-      file: services/notes/docker-compose.yml
-      service: notes
+      file: services/newsdesk/docker-compose.yml
+      service: newsdesk

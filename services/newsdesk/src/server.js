@@ -1,5 +1,5 @@
 // server.js
-// Notes service for Podcast Scripter: an inbox for X posts, article links and
+// Newsdesk for Podcast Scripter: an inbox for X posts, article links and
 // notes (shared from a phone or the Mac app), plus RSS news for the editor.
 //
 //   GET    /api/health                      -> { ok, version } (no auth)
@@ -48,6 +48,19 @@ const auth = createAuth({
 });
 
 const app = express();
+
+// One line per change and per refused request, e.g. "POST /api/items 201 · 192.168.10.42 · Shortcuts",
+// so it's easy to see what a phone or the app is sending.
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    if (req.method === 'GET' && res.statusCode < 400) return;
+    if (req.path.startsWith('/api/rankings/sync') && res.statusCode < 400) return;
+    const ip = (req.ip || '').replace(/^::ffff:/, '');
+    const agent = (req.get('user-agent') || '').split(/[ /]/)[0] || 'unknown';
+    console.log(`${req.method} ${req.originalUrl.split('?')[0]} ${res.statusCode} · ${ip} · ${agent}`);
+  });
+  next();
+});
 app.use(auth.middleware);
 // Ask Gemma sends the app's scripts along with the question.
 app.use(express.json({ limit: '8mb' }));
@@ -82,22 +95,38 @@ app.get('/api/items', wrap((req, res) => {
   res.json(db.listInbox({ status }));
 }));
 
-app.post('/api/items', wrap(async (req, res) => {
+// `?reply=text` answers with one readable line ("Added: …") instead of JSON, so the iPhone
+// Shortcut can show it as a notification with no extra steps.
+const wantsText = (req) => req.query.reply === 'text';
+
+app.post('/api/items', async (req, res) => {
   // `input` is the main field; `url` and `text` are accepted for convenience.
   const body = req.body || {};
   const input = body.input ?? body.url ?? body.text;
-  const built = await buildItem(input, { title: body.title });
-
-  if (built.url) {
-    const existing = db.findInboxItemByUrl(built.url);
+  try {
+    const built = await buildItem(input, { title: body.title });
+    let item;
+    let status = 201;
+    const existing = built.url ? db.findInboxItemByUrl(built.url) : null;
     if (existing) {
       // Re-sharing something already handled puts it back in the inbox.
-      const item = existing.status === 'inbox' ? existing : db.updateStatus(existing.id, 'inbox');
-      return res.status(200).json(item);
+      item = existing.status === 'inbox' ? existing : db.updateStatus(existing.id, 'inbox');
+      status = 200;
+    } else {
+      item = db.insertItem(built);
     }
+    if (wantsText(req)) {
+      return res.status(status).type('text').send(`${status === 201 ? 'Added' : 'Already saved'}: ${item.title}`);
+    }
+    res.status(status).json(item);
+  } catch (err) {
+    const code = err instanceof HttpError ? err.status : 500;
+    if (code === 500) console.error(err);
+    const message = code === 500 ? 'Something went wrong.' : err.message;
+    if (wantsText(req)) return res.status(code).type('text').send(`Couldn’t add it: ${message}`);
+    res.status(code).json({ error: message });
   }
-  res.status(201).json(db.insertItem(built));
-}));
+});
 
 app.patch('/api/items/:id', wrap((req, res) => {
   const { status } = req.body || {};
@@ -315,5 +344,5 @@ config.onChange((cfg, id) => projects.run(id, () => {
 
 app.listen(PORT, () => {
   const modes = [auth.loginEnabled && 'login', auth.tokenEnabled && 'token'].filter(Boolean);
-  console.log(`notes service v${version} listening on port ${PORT} (auth: ${modes.join(' + ') || 'none, API is open'})`);
+  console.log(`Newsdesk v${version} listening on port ${PORT} (auth: ${modes.join(' + ') || 'none, API is open'})`);
 });

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0F0F11">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Riot Inbox">
-  <title>Podcast Inbox</title>
+  <meta name="apple-mobile-web-app-title" content="Newsdesk">
+  <title>Newsdesk</title>
   <style>
     :root {
       --bg: #0F0F11; --surface: #17171A; --raised: #1E1E22; --border: rgba(255,255,255,.08);
@@ -65,7 +65,7 @@
     .meta .link { color: var(--text2); }
     .meta .del { margin-left: auto; color: var(--text3); }
     .empty { color: var(--text3); text-align: center; padding: 32px 0; margin: 0; }
-    .rankings { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-top: 16px; }
+    .rankings { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin: 4px 0 16px; }
     .rankings .head { display: flex; align-items: center; gap: 10px; }
     .rankings .head strong { font-size: 14px; flex: 1; }
     .rankings .head button { padding: 7px 12px; font-size: 13px; }
@@ -80,20 +80,12 @@
 <body>
 <main>
   <header class="top-bar">
-    <h1>Inbox</h1>
+    <h1>Newsdesk</h1>
     <label class="project">
       <span>Project</span>
       <select id="project" aria-label="Project"></select>
     </label>
   </header>
-  <form id="add">
-    <textarea id="input" placeholder="Paste an X post or article link, or type a note…" autocapitalize="sentences"></textarea>
-    <div class="row">
-      <div class="hint">Links are fetched automatically. Anything else becomes a note.</div>
-      <button type="submit" id="submit">Add</button>
-    </div>
-  </form>
-  <div class="msg" id="msg"></div>
   <section class="rankings">
     <div class="head">
       <strong>Power Rankings</strong>
@@ -102,6 +94,14 @@
     <div class="chips" id="chips"></div>
     <div class="sub" id="syncinfo"></div>
   </section>
+  <form id="add">
+    <textarea id="input" placeholder="Paste an X post or article link, or type a note…" autocapitalize="sentences"></textarea>
+    <div class="row">
+      <div class="hint">Links are fetched automatically. Anything else becomes a note.</div>
+      <button type="submit" id="submit">Add</button>
+    </div>
+  </form>
+  <div class="msg" id="msg"></div>
   <nav class="tabs">
     <button type="button" data-filter="all">All<span class="n"></span></button>
     <button type="button" data-filter="inbox">Queue<span class="n"></span></button>

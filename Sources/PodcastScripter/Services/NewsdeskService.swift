@@ -1,7 +1,8 @@
 import Foundation
 
-/// Where the notes service lives. Edited in Settings (⌘,).
+/// Where Newsdesk lives. Edited in Settings (⌘,).
 enum ServiceSettings {
+    // Saved under the names from before Newsdesk was named, so existing settings carry over.
     static let urlKey = "notesServiceURL"
     static let tokenKey = "notesServiceToken"
     static let defaultURL = "http://localhost:3030"
@@ -22,8 +23,8 @@ enum ItemStatus: String, Sendable {
     case dismissed
 }
 
-/// The boundary to the notes service in services/notes (the story inbox and RSS news).
-protocol NotesService: Sendable {
+/// The boundary to Newsdesk in services/newsdesk (the story inbox and RSS news).
+protocol NewsdeskService: Sendable {
     func fetchInbox() async throws -> [StoryItem]
     /// Only news that hasn't been used or dismissed.
     func fetchNews(category: NewsCategory, limit: Int) async throws -> [NewsItem]
@@ -175,7 +176,7 @@ struct AskReply: Decodable, Sendable {
     var sources: AskSources?
 }
 
-/// What the notes service gave Gemma for one question.
+/// What Newsdesk gave Gemma for one question.
 struct AskSources: Codable, Equatable, Sendable {
     /// Script passages, labeled with their episode.
     var excerpts: [Excerpt]
@@ -238,21 +239,21 @@ struct AIReply: Decodable, Equatable, Sendable {
 
 // MARK: - HTTP client
 
-enum NotesServiceError: LocalizedError {
+enum NewsdeskError: LocalizedError {
     case unreachable(String)
     case unauthorized
     case server(String)
 
     var errorDescription: String? {
         switch self {
-        case .unreachable(let host): "Can't reach the notes service at \(host). Is it running?"
-        case .unauthorized: "The notes service rejected the token. Check it in Settings (⌘,)."
+        case .unreachable(let host): "Can't reach Newsdesk at \(host). Is it running?"
+        case .unauthorized: "Newsdesk rejected the token. Check it in Settings (⌘,)."
         case .server(let message): message
         }
     }
 }
 
-struct NotesServiceClient: NotesService {
+struct NewsdeskClient: NewsdeskService {
     var baseURL: URL
     var token: String
     /// Sent as X-Project so the service acts on this project; empty = the service's default.
@@ -278,7 +279,7 @@ struct NotesServiceClient: NotesService {
 
     func add(input: String) async throws -> StoryItem {
         let item: ServiceItem = try await send("api/items", method: "POST", body: ["input": input])
-        guard let story = item.storyItem else { throw NotesServiceError.server("Unexpected response from the notes service.") }
+        guard let story = item.storyItem else { throw NewsdeskError.server("Unexpected response from Newsdesk.") }
         return story
     }
 
@@ -386,7 +387,7 @@ struct NotesServiceClient: NotesService {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            throw NotesServiceError.server("Unexpected response from the notes service.")
+            throw NewsdeskError.server("Unexpected response from Newsdesk.")
         }
     }
 
@@ -399,7 +400,7 @@ struct NotesServiceClient: NotesService {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            throw NotesServiceError.server("Unexpected response from the notes service.")
+            throw NewsdeskError.server("Unexpected response from Newsdesk.")
         }
     }
 
@@ -426,14 +427,14 @@ struct NotesServiceClient: NotesService {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            throw NotesServiceError.unreachable(baseURL.host() ?? baseURL.absoluteString)
+            throw NewsdeskError.unreachable(baseURL.host() ?? baseURL.absoluteString)
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw NotesServiceError.unauthorized }
+        if status == 401 { throw NewsdeskError.unauthorized }
         guard (200..<300).contains(status) else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
-            throw NotesServiceError.server(message ?? "The notes service returned HTTP \(status).")
+            throw NewsdeskError.server(message ?? "Newsdesk returned HTTP \(status).")
         }
         return data
     }

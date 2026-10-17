@@ -1,25 +1,25 @@
-# Send to Riot Report from iPhone
+# Send to Newsdesk from iPhone
 
 An Apple Shortcut that appears in the iPhone share menu. Share an X post, a Safari page, or text, and it lands in the Story Queue.
 
-The phone needs to reach the notes service: on home Wi-Fi directly, or from anywhere over your WireGuard connection to home.
+The phone needs to reach Newsdesk: on home Wi-Fi directly, or from anywhere over your WireGuard connection to home.
 
 ## Before you start
 
-1. **Service address.** This is the address of the machine running the notes service, on your home network, for example `http://192.168.10.50:3030`.
+1. **Service address.** This is the address of the machine running Newsdesk, on your home network, for example `http://192.168.10.50:3030`.
    - On the Mac: System Settings → Wi-Fi → Details → IP address, while you're connected to home Wi-Fi.
    - Use the IP address, not `something.local`. `.local` names don't resolve over WireGuard.
    - **Reserve that IP** in your router's DHCP settings (or Pi-hole's, if it does DHCP) so it doesn't change. Otherwise the Shortcut breaks whenever the Mac gets a new address.
    - When the service moves to the OptiPlex, use its address (`http://192.168.10.135:3030`) instead.
 2. **Token.** The value of `NOTES_TOKEN` in the repo's `.env` file. The Shortcut uses this token instead of your login, so it never asks for a password.
-3. **Quick check.** On the phone, open Safari to `http://<address>:3030` and log in with `NOTES_USER` / `NOTES_PASSWORD`. Let Safari save the password. You should see the Riot Report Inbox page. If you don't, fix that first: check the address, that WireGuard is connected, and that the service is running.
+3. **Quick check.** On the phone, open Safari to `http://<address>:3030` and log in with `NOTES_USER` / `NOTES_PASSWORD`. Let Safari save the password. You should see the Newsdesk page. If you don't, fix that first: check the address, that WireGuard is connected, and that the service is running.
    - If you use a VPN on the Mac, make sure it allows local network (LAN) connections, or nothing on your network can reach the Mac.
 
 ## Build the Shortcut
 
 In the **Shortcuts** app on the iPhone:
 
-1. Tap **+** to create a new shortcut. Tap the name at the top and rename it **Send to Riot Report**. This name is what appears in the share menu and what you say to Siri.
+1. Tap **+** to create a new shortcut. Tap the name at the top and rename it **Send to Newsdesk**. This name is what appears in the share menu and what you say to Siri.
 2. In the same menu, choose **Choose Icon** and pick a glyph and color, for example the claret color with a microphone or soccer-ball icon.
 3. Tap the **ⓘ** (Details) button:
    - Turn on **Show in Share Sheet**.
@@ -34,7 +34,7 @@ In the **Shortcuts** app on the iPhone:
 5. Add **Get Dictionary Value**. Set it to get **Value** for key `title` in **Contents of URL**.
 6. Add **Show Notification**. Set the text to `Added: ` followed by the **Dictionary Value** variable.
 
-Done. In X, tap **Share → Send to Riot Report**. You'll see "Added: Real Salt Lake (@realsaltlake)", and within a minute the post is in the Mac app's Story Queue. Click the refresh button in the queue's header to see it immediately.
+Done. In X, tap **Share → Send to Newsdesk**. You'll see "Added: Real Salt Lake (@realsaltlake)", and within a minute the post is in the Mac app's Story Queue. Click the refresh button in the queue's header to see it immediately.
 
 ## Sending to a different project
 
@@ -43,7 +43,7 @@ Shares go to your default project (the first one, e.g. RSL Riot Report). To make
 ## Making it yours
 
 - **Position in the share menu:** in any share sheet, scroll the app/action row to the end → **Edit Actions** → add it to **Favorites** and drag it to the top.
-- **Siri:** say "Send to Riot Report" and dictate a note.
+- **Siri:** say "Send to Newsdesk" and dictate a note.
 - **Action Button / Back Tap:** Settings → Action Button (iPhone 15 Pro and later), or Settings → Accessibility → Touch → Back Tap, and pick the shortcut. Useful for quick voice notes during a match.
 - **A dedicated "quick note" shortcut:** duplicate the shortcut, rename it **Riot Note**, and put **Dictate Text** at the top. Use **Dictated Text** as the `input` value, then add it to your Home Screen.
 - **Inbox page on the Home Screen:** open `http://<address>:3030` in Safari → Share → **Add to Home Screen**. It works like a small app for reviewing or deleting what's queued.

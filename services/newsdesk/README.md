@@ -1,6 +1,15 @@
-# Notes service
+# Newsdesk
 
-The inbox behind the app's Story Queue, plus the RSS news shown in the editor sidebar. It grew out of x-post-archiver and imports that tool's `posts.json` the first time it starts.
+Newsdesk is the Docker service behind Podcast Scripter, and the web page it serves. It's where stories come in and where everything the show needs is collected:
+
+- the **story inbox**, fed by the Mac app, the **Send to Newsdesk** iPhone Shortcut and the web page, with its full history
+- **team and league news** from RSS feeds
+- the **league table** and the club's **matches** (from ESPN)
+- **power rankings** from five sources, saved by season
+- **settings per project** (one show and team each)
+- **Gemma** requests, on the Gemini API or a local model
+
+It grew out of x-post-archiver and imports that tool's `posts.json` the first time it starts.
 
 - **X post links** are fetched through X's public oEmbed endpoint, which needs no API key. It only works for public posts, and gives the post date but not the time.
 - **Other links** become articles, using the page's Open Graph tags for the title, summary, site name and image.
@@ -10,7 +19,7 @@ The inbox behind the app's Story Queue, plus the RSS news shown in the editor si
 
 ## Run
 
-This folder runs on its own, so a server or Raspberry Pi only needs `services/notes`. The main README shows a sparse checkout that downloads just this folder.
+This folder runs on its own, so a server or Raspberry Pi only needs `services/newsdesk`. The main README shows a sparse checkout that downloads just this folder.
 
 ```sh
 cp .env.example .env            # fill in: login, token, optional Gemini key and Gmail

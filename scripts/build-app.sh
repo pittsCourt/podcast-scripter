@@ -28,11 +28,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <!-- The notes service is plain HTTP on localhost or the home network (reached remotely over WireGuard). -->
+    <!-- Newsdesk is plain HTTP on localhost or the home network (reached remotely over WireGuard). -->
     <key>NSAppTransportSecurity</key>
     <!-- The article reader (WKWebView) can also open plain-HTTP news sites. -->
     <dict><key>NSAllowsLocalNetworking</key><true/><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>
-    <key>NSLocalNetworkUsageDescription</key><string>Connects to your notes service on your home network.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>Connects to your Newsdesk on your home network.</string>
 </dict>
 </plist>
 PLIST

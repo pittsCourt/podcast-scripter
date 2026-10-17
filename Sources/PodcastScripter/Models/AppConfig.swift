@@ -1,7 +1,7 @@
 import Foundation
 
-/// Show, script template, team and data-source settings. Owned by the notes service
-/// (`/api/config`, defaults in services/notes/config.default.json) and edited in Settings.
+/// Show, script template, team and data-source settings. Owned by Newsdesk
+/// (`/api/config`, defaults in services/newsdesk/config.default.json) and edited in Settings.
 /// The app keeps the last copy it saw so it works offline.
 struct AppConfig: Codable, Equatable, Sendable {
     var show: Show
@@ -128,7 +128,7 @@ struct AppConfig: Codable, Equatable, Sendable {
         competitions.first { $0.espnLeague == team.espnLeague }?.name ?? team.espnLeague.uppercased()
     }
 
-    /// Used until the notes service is reached. Keep in sync with services/notes/config.default.json
+    /// Used until Newsdesk is reached. Keep in sync with services/newsdesk/config.default.json
     /// (a test checks this).
     static let fallback = AppConfig(
         show: Show(name: "Riot Report", fullName: "RSL Riot Report", host: "Court", xHandle: "@rslriotreport"),

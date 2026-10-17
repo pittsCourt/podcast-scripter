@@ -44,10 +44,13 @@ function createAuth({ token, user, password }) {
       const creds = parseBasic(header);
       // Evaluate both comparisons so timing doesn't reveal which part was wrong.
       if (creds && safeEqual(creds.user, user) & safeEqual(creds.password, password)) return next();
-      res.set('WWW-Authenticate', 'Basic realm="Riot Report Inbox", charset="UTF-8"');
+      res.set('WWW-Authenticate', 'Basic realm="Newsdesk", charset="UTF-8"');
     }
 
     if (req.path.startsWith('/api/')) {
+      if (req.query.reply === 'text') {
+        return res.status(401).type('text').send('Couldn’t add it: the token is missing or wrong. Check the token in the Shortcut’s URL.');
+      }
       return res.status(401).json({ error: loginEnabled ? 'Log in required.' : 'Missing or wrong token.' });
     }
     res.status(401).type('text').send('Log in required.');

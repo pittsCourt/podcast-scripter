@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings (⌘,). Show, template, team and source settings are saved in the notes service so every
+/// Settings (⌘,). Show, template, team and source settings are saved in Newsdesk so every
 /// device shares them; the service address and token are stored on this Mac.
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
@@ -31,7 +31,7 @@ struct SettingsView: View {
                 AISettings(draft: $draft, hasUnsavedChanges: hasChanges)
                     .tabItem { Label("AI", systemImage: "sparkles") }
                 ServiceSettingsTab()
-                    .tabItem { Label("Notes Service", systemImage: "server.rack") }
+                    .tabItem { Label("Newsdesk", systemImage: "server.rack") }
             }
             .padding(.top, 8)
 
@@ -40,7 +40,7 @@ struct SettingsView: View {
                 statusText
                 Spacer()
                 Button("Reset to Defaults…") { Task { await reset() } }
-                    .help("Restore the defaults from services/notes/config.default.json")
+                    .help("Restore the defaults from services/newsdesk/config.default.json")
                 Button("Revert") { draft = store.config }
                     .disabled(!hasChanges)
                 Button("Save") { Task { await save() } }
@@ -62,7 +62,7 @@ struct SettingsView: View {
     private var statusText: some View {
         switch status {
         case .idle:
-            Text(hasChanges ? "Unsaved changes" : "Saved in the notes service and shared by every device.")
+            Text(hasChanges ? "Unsaved changes" : "Saved in Newsdesk and shared by every device.")
                 .foregroundStyle(.secondary)
         case .saving:
             ProgressView().controlSize(.small)
@@ -155,7 +155,7 @@ private struct ShowSettings: View {
                 }
             }
         } message: {
-            Text("Its \(store.scripts.count) scripts, Story Queue, Story Tracker, news, saved power rankings and settings will be permanently deleted and no longer stored, on this Mac and in the notes service. This can’t be undone.")
+            Text("Its \(store.scripts.count) scripts, Story Queue, Story Tracker, news, saved power rankings and settings will be permanently deleted and no longer stored, on this Mac and in Newsdesk. This can’t be undone.")
         }
     }
 }
@@ -344,7 +344,7 @@ private struct RankingsSettings: View {
             } header: {
                 Text("Sources")
             } footer: {
-                Text("Each source has its own reader in the notes service, built for that publication. Gmail’s address and app password stay in .env.")
+                Text("Each source has its own reader in Newsdesk, built for that publication. Gmail’s address and app password stay in .env.")
                     .foregroundStyle(.secondary)
             }
 
@@ -410,7 +410,7 @@ private struct AISettings: View {
                 }
                 .pickerStyle(.radioGroup)
             } footer: {
-                Text("Gemma powers story suggestions, briefings, intro bullets and Ask Gemma. Requests go through the notes service.")
+                Text("Gemma powers story suggestions, briefings, intro bullets and Ask Gemma. Requests go through Newsdesk.")
                     .foregroundStyle(.secondary)
             }
 
@@ -426,7 +426,7 @@ private struct AISettings: View {
                 } header: {
                     Text("Gemini API")
                 } footer: {
-                    Text("Put your Google AI Studio key in .env as GEMINI_API_KEY=…, then run docker compose up -d. The key never leaves the notes service. 26B is faster; 31B is a little stronger.")
+                    Text("Put your Google AI Studio key in .env as GEMINI_API_KEY=…, then run docker compose up -d. The key never leaves Newsdesk. 26B is faster; 31B is a little stronger.")
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -436,7 +436,7 @@ private struct AISettings: View {
                 } header: {
                     Text("Local model (Ollama)")
                 } footer: {
-                    Text("Run `ollama serve` and `ollama pull \(draft.aiSettings.ollama.model)` on the machine running Ollama. From the notes service’s container, this Mac is host.docker.internal. On an Intel Mac a local model is slow; the Gemini API is faster.")
+                    Text("Run `ollama serve` and `ollama pull \(draft.aiSettings.ollama.model)` on the machine running Ollama. From Newsdesk’s container, this Mac is host.docker.internal. On an Intel Mac a local model is slow; the Gemini API is faster.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -498,7 +498,7 @@ private struct AISettings: View {
     }
 }
 
-// MARK: - Notes service (this Mac only)
+// MARK: - Newsdesk (this Mac only)
 
 private struct ServiceSettingsTab: View {
     @Environment(AppStore.self) private var store
@@ -523,7 +523,7 @@ private struct ServiceSettingsTab: View {
                     Button("Connect & Test") { Task { await test() } }
                 }
             } header: {
-                Text("Notes Service")
+                Text("Newsdesk")
             } footer: {
                 Text("Stored on this Mac only. Use http://localhost:3030 when the service runs here, or the server’s home-network address.")
                     .foregroundStyle(.secondary)

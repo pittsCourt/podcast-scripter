@@ -182,8 +182,8 @@ struct ScriptFormattingTests {
     }
 }
 
-/// Records status changes instead of calling the notes service.
-private final class FakeNotesService: NotesService, @unchecked Sendable {
+/// Records status changes instead of calling Newsdesk.
+private final class FakeNewsdeskService: NewsdeskService, @unchecked Sendable {
     var statuses: [UUID: ItemStatus] = [:]
     var inbox: [StoryItem] = []
     var newsItems: [NewsItem] = []
@@ -238,7 +238,7 @@ private final class FakeNotesService: NotesService, @unchecked Sendable {
 @MainActor
 struct AddToScriptTests {
     @Test func addsSelectedStoriesOnceAndMarksThemUsed() async throws {
-        let service = FakeNotesService()
+        let service = FakeNewsdeskService()
         let post = StoryItem(kind: .xPost, title: "RSL (@realsaltlake)", body: "Lineup is out")
         let headline = NewsItem(category: .team, headline: "Preview: RSL at SKC", summary: "", source: "KSL", publishedAt: Date())
         service.inbox = [post]
@@ -265,7 +265,7 @@ struct AddToScriptTests {
 @MainActor
 struct ReturnToQueueTests {
     @Test func removesFromScriptAndRestoresInbox() async throws {
-        let service = FakeNotesService()
+        let service = FakeNewsdeskService()
         let post = StoryItem(kind: .xPost, title: "RSL (@realsaltlake)", body: "Lineup")
         let note = StoryItem(kind: .storyNote, title: "Ask about the back line", body: "")
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
@@ -288,7 +288,7 @@ struct ScriptTemplateTests {
     @Test func newScriptsStartWithShowSections() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: file)
         let date = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 16)))
         let script = store.createScript(name: "Episode", date: date)
 
@@ -307,7 +307,7 @@ struct ScriptTemplateTests {
     }
 
     @Test func deleteKeepsHistory() async {
-        let service = FakeNotesService()
+        let service = FakeNewsdeskService()
         let post = StoryItem(kind: .xPost, title: "RSL", body: "")
         service.inbox = [post]
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
@@ -322,7 +322,7 @@ struct ScriptTemplateTests {
 }
 
 struct MatchesDecodingTests {
-    /// A real /api/matches response saved from the notes service.
+    /// A real /api/matches response saved from Newsdesk.
     @Test func decodesServiceResponse() throws {
         let url = try #require(Bundle.module.url(forResource: "matches-sample", withExtension: "json"))
         let matches = try JSONDecoder().decode(Matches.self, from: Data(contentsOf: url))
@@ -344,7 +344,7 @@ struct MatchesDecodingTests {
 }
 
 struct RankingsDecodingTests {
-    /// A real /api/rankings response saved from the notes service.
+    /// A real /api/rankings response saved from Newsdesk.
     @Test func decodesServiceResponse() throws {
         let url = try #require(Bundle.module.url(forResource: "rankings-sample", withExtension: "json"))
         let summary = try JSONDecoder().decode(RankingsSummary.self, from: Data(contentsOf: url))
@@ -375,7 +375,7 @@ struct AppConfigTests {
     @Test func fallbackMatchesServiceDefaults() throws {
         let file = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("services/notes/config.default.json")
+            .appendingPathComponent("services/newsdesk/config.default.json")
         let defaults = try JSONDecoder().decode(AppConfig.self, from: Data(contentsOf: file))
         // Section and competition IDs are generated locally, so compare their content.
         #expect(defaults.template.sections.map { [$0.title, $0.body] } == AppConfig.fallback.template.sections.map { [$0.title, $0.body] })
@@ -409,7 +409,7 @@ struct StoryTaggingTests {
     @Test func tagsToNewAndExistingStories() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: file)
         let script = store.createScript(name: "Episode 30", date: Date())
         let before = store.trackedStories.count
 
@@ -437,7 +437,7 @@ struct StoryTaggingTests {
 @MainActor
 struct GemmaFeatureTests {
     @Test func askSendsScriptsAndTrackerAndKeepsHistory() async throws {
-        let service = FakeNotesService()
+        let service = FakeNewsdeskService()
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = AppStore(service: service, fileURL: file)
@@ -489,7 +489,7 @@ struct ProjectTests {
         """#
         try Data(legacy.utf8).write(to: file)
 
-        let service = FakeNotesService()
+        let service = FakeNewsdeskService()
         let store = AppStore(service: service, fileURL: file)
         #expect(store.projectData.count == 1)
         #expect(store.scripts.map(\.name) == ["Episode 1"])
@@ -509,7 +509,7 @@ struct ProjectTests {
     @Test func projectsKeepTheirOwnScriptsAndStories() async throws {
         let file = tempFile()
         defer { try? FileManager.default.removeItem(at: file) }
-        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: file)
         await store.refreshProjects()
         let rslScript = store.createScript(name: "RSL Episode", date: Date())
         store.addTrackedStory(title: "RSL Story")
@@ -616,7 +616,7 @@ struct TrackedStoryStatusTests {
     @Test func statusIsOptionalAndKeepsHistory() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: file)
         store.addTrackedStory(title: "Luna to Europe")
         let id = try #require(store.trackedStories.first { $0.title == "Luna to Europe" }?.id)
         #expect(store.trackedStories.first { $0.id == id }?.status == nil) // not required
@@ -639,7 +639,7 @@ struct TrackedStoryStatusTests {
     @Test func taggingCarriesPassageAndStoryStatus() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: file)
         let script = store.createScript(name: "Episode 29", date: Date())
         let story = try #require(store.tagPassage("Bundesliga interest in Luna", in: script.id, story: nil, newTitle: "Luna to Europe",
                                                   note: nil, passageStatus: .rumor, storyStatus: .some(.rumor)))
@@ -657,7 +657,7 @@ struct TrackedStoryStatusTests {
         text.addAttribute(.backgroundColor, value: StoryStatus.confirmed.tint, range: NSRange(location: 28, length: 13))
         script.plainText = text.string
         script.richText = ScriptStyle.rtfData(text)
-        let store = AppStore(service: FakeNotesService(), fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json"))
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json"))
         #expect(store.aiText(script) == "[RUMOR] Luna could move in January. [/RUMOR] [CONFIRMED] Glad is back. [/CONFIRMED]")
     }
 
@@ -697,7 +697,7 @@ struct ResolveAndSelectAllTests {
     @Test func resolvingMovesStoriesToHistoryAndBack() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let store = AppStore(service: FakeNotesService(), fileURL: file)
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: file)
         store.addTrackedStory(title: "Glad Injury")
         let id = try #require(store.trackedStories.first { $0.title == "Glad Injury" }?.id)
 
@@ -713,7 +713,7 @@ struct ResolveAndSelectAllTests {
     }
 
     @Test func selectAllTogglesASection() {
-        let store = AppStore(service: FakeNotesService(), fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json"))
+        let store = AppStore(service: FakeNewsdeskService(), fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("scripter-test-\(UUID()).json"))
         let a = UUID(), b = UUID(), other = UUID()
         store.selectedStoryIDs = [a, other]
         store.toggleSelectAll([a, b])          // some selected -> select all

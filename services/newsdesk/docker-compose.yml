@@ -1,10 +1,10 @@
-# Notes service on its own (a server, Raspberry Pi, or this Mac).
+# Newsdesk on its own (a server, Raspberry Pi, or this Mac).
 #   cp .env.example .env   # then fill it in
 #   docker compose up -d --build
 #   open http://<this machine>:3030
 # Data (inbox, news, rankings, settings) lives in ./data next to this file.
 services:
-  notes:
+  newsdesk:
     build: .
     ports:
       - "3030:3000"

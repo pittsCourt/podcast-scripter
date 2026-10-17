@@ -10,7 +10,7 @@ struct StoryQueuePanel: View {
             SectionHeader(title: "Story Queue", count: store.storyQueue.count) {
                 SelectAllCheckbox(ids: store.filteredQueue.map(\.id))
                 ConnectionIndicator(state: store.connection)
-                IconButton(systemName: "arrow.clockwise", help: "Refresh from the notes service") {
+                IconButton(systemName: "arrow.clockwise", help: "Refresh from Newsdesk") {
                     Task { await store.refresh() }
                 }
                 IconButton(systemName: "plus", help: "Add a link or note") { adding = true }
@@ -47,7 +47,7 @@ struct StoryQueuePanel: View {
     }
 }
 
-/// RSL News or League News, pulled from the notes service's RSS feeds.
+/// RSL News or League News, pulled from Newsdesk's RSS feeds.
 struct NewsPanel: View {
     @Environment(AppStore.self) private var store
     var category: NewsCategory
@@ -243,7 +243,7 @@ private struct SelectableStoryRow: View {
     }
 }
 
-/// Small dot showing whether the notes service is reachable.
+/// Small dot showing whether Newsdesk is reachable.
 private struct ConnectionIndicator: View {
     var state: ConnectionState
 
@@ -265,7 +265,7 @@ private struct ConnectionIndicator: View {
 
     private var help: String {
         switch state {
-        case .connecting: "Connecting to the notes service…"
+        case .connecting: "Connecting to Newsdesk…"
         case .online(let date): "Synced \(date.formatted(date: .omitted, time: .shortened))"
         case .offline(let reason): "Offline — showing cached stories. \(reason)"
         }
@@ -337,7 +337,7 @@ private struct AddStorySheet: View {
                         .lineLimit(3...8)
                         .labelsHidden()
                 } footer: {
-                    Text("Links are fetched by the notes service. Anything else becomes a note.")
+                    Text("Links are fetched by Newsdesk. Anything else becomes a note.")
                         .font(.system(size: Zoom.s(11)))
                         .foregroundStyle(Theme.textTertiary)
                 }
