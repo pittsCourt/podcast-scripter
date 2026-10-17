@@ -342,6 +342,16 @@ config.onChange((cfg, id) => projects.run(id, () => {
   feeds.syncDefaultFeeds(cfg);
 }));
 
+// Close the database cleanly on `docker compose down`, so all changes are in notes.db itself.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    try {
+      db.connection.close();
+    } catch { /* already closed */ }
+    process.exit(0);
+  });
+}
+
 app.listen(PORT, () => {
   const modes = [auth.loginEnabled && 'login', auth.tokenEnabled && 'token'].filter(Boolean);
   console.log(`Newsdesk v${version} listening on port ${PORT} (auth: ${modes.join(' + ') || 'none, API is open'})`);

@@ -65,16 +65,6 @@
     .meta .link { color: var(--text2); }
     .meta .del { margin-left: auto; color: var(--text3); }
     .empty { color: var(--text3); text-align: center; padding: 32px 0; margin: 0; }
-    .rankings { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin: 4px 0 16px; }
-    .rankings .head { display: flex; align-items: center; gap: 10px; }
-    .rankings .head strong { font-size: 14px; flex: 1; }
-    .rankings .head button { padding: 7px 12px; font-size: 13px; }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .chip { background: var(--raised); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 13px; }
-    .chip b { font-variant-numeric: tabular-nums; }
-    .chip .src { color: var(--text2); margin-right: 5px; }
-    .chip .up { color: #4ADE80; } .chip .down { color: var(--bad); } .chip .warn { color: #FBBF24; }
-    .rankings .sub { color: var(--text3); font-size: 12px; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -86,14 +76,6 @@
       <select id="project" aria-label="Project"></select>
     </label>
   </header>
-  <section class="rankings">
-    <div class="head">
-      <strong>Power Rankings</strong>
-      <button type="button" id="sync">Sync now</button>
-    </div>
-    <div class="chips" id="chips"></div>
-    <div class="sub" id="syncinfo"></div>
-  </section>
   <form id="add">
     <textarea id="input" placeholder="Paste an X post or article link, or type a note…" autocapitalize="sentences"></textarea>
     <div class="row">
